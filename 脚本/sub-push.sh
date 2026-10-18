@@ -5,10 +5,9 @@ set -e
 
 # 获取当前脚本所在绝对路径，并定位到子仓库根目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-# 如果你把脚本放在 src/blog/脚本 下，这里就是 src/blog
 cd "$SCRIPT_DIR/.."
 
-# 防呆检查：确保当前确实是 Git 仓库（兼容 .git 文件和文件夹）
+# 防呆检查：确保当前确实是 Git 仓库
 if [ ! -e ".git" ]; then
     echo "❌ 错误: 当前目录不是 Git 仓库！当前路径: $(pwd)"
     exit 1
@@ -16,9 +15,24 @@ fi
 
 # ================= 功能函数 =================
 
+# 0. 手动更新代码
+do_update() {
+    echo ""
+    echo "🔄 正在从远程拉取最新代码 (git pull --rebase)..."
+    if git pull --rebase origin main; then
+        echo "✅ 代码更新成功！"
+    else
+        echo "❌ 更新失败，可能存在冲突。请手动在终端解决冲突后执行 git rebase --continue"
+    fi
+    read -p "按回车键返回主菜单..."
+}
+
 # 1. 提交文档
 do_commit() {
     echo ""
+    echo "🔄 提交前自动检查远程更新..."
+    git pull --rebase origin main > /dev/null 2>&1 || true
+
     echo "请选择本次提交的类型："
     PS3="请输入数字 (1-5): "
     select TYPE in "新增内容 (feat)" "修改文档 (docs)" "修复错误 (fix)" "排版美化 (style)" "其他 (chore)"; do
@@ -55,6 +69,7 @@ do_commit() {
         echo "✅ 推送成功！"
         echo "⚠️  请记得回到主目录执行 ./scripts/push-docs.sh 更新主仓库指针！"
     fi
+    read -p "按回车键返回主菜单..."
 }
 
 # 2. 查看提交记录
@@ -69,6 +84,9 @@ do_view_log() {
 # 3. 撤回上一次提交（强制重置版）
 do_revert_last() {
     echo ""
+    echo "🔄 撤回前先同步远程状态..."
+    git fetch origin main > /dev/null 2>&1 || true
+
     echo "⚠️  你选择了【撤回上一次提交】。"
     echo "此操作会直接抹除最近一次提交，并将文件恢复到提交前的状态。"
     read -p "确认要撤回吗？(y/N) " CONFIRM
@@ -78,16 +96,19 @@ do_revert_last() {
     fi
 
     echo "🚀 执行中..."
-    # 强制回退到上一个版本
     git reset --hard HEAD~1
-    # 强制推送到远程覆盖
+    # 注意这里加了 --force 强制推送
     git push origin main --force
     echo "✅ 撤回成功！文件已恢复，且未产生新的 commit。"
+    read -p "按回车键返回主菜单..."
 }
 
 # 4. 撤回特定提交（强制重置版）
 do_revert_specific() {
     echo ""
+    echo "🔄 撤回前先同步远程状态..."
+    git fetch origin main > /dev/null 2>&1 || true
+
     git log --oneline -15 --color=always
     read -p "请输入你想撤回的 commit hash (前7位即可): " COMMIT_HASH
 
@@ -108,6 +129,7 @@ do_revert_specific() {
     git reset --hard "$COMMIT_HASH"
     git push origin main --force
     echo "✅ 已成功重置到该提交，后续记录已抹除。"
+    read -p "按回车键返回主菜单..."
 }
 
 # ================= 主菜单循环 =================
@@ -121,17 +143,19 @@ while true; do
     echo "  2. 查看提交记录"
     echo "  3. 撤回上一次提交 (彻底回退)"
     echo "  4. 撤回特定提交 (彻底回退)"
-    echo "  5. 退出"
+    echo "  5. 手动从远程更新 (git pull)"
+    echo "  6. 退出"
     echo "=========================================="
 
-    read -p "请选择操作 (1-5): " CHOICE
+    read -p "请选择操作 (1-6): " CHOICE
 
     case $CHOICE in
         1) do_commit ;;
         2) do_view_log ;;
         3) do_revert_last ;;
         4) do_revert_specific ;;
-        5) echo "👋 再见！"; exit 0 ;;
+        5) do_update ;;
+        6) echo "👋 再见！"; exit 0 ;;
         *) echo "❌ 无效的选项，请重新选择。" ;;
     esac
 done
