@@ -97,7 +97,6 @@ do_revert_last() {
 
     echo "🚀 执行中..."
     git reset --hard HEAD~1
-    # 注意这里加了 --force 强制推送
     git push origin main --force
     echo "✅ 撤回成功！文件已恢复，且未产生新的 commit。"
     read -p "按回车键返回主菜单..."
@@ -132,6 +131,40 @@ do_revert_specific() {
     read -p "按回车键返回主菜单..."
 }
 
+# 5. 运行同级目录下的 geshihua.js (新增功能)
+do_format() {
+    echo ""
+    # 获取脚本所在目录
+    LOCAL_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+    
+    # 检查有没有 node 环境
+    if ! command -v node &> /dev/null; then
+        echo "❌ 错误: 未找到 Node.js！请先安装 Node.js。"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
+
+    # 检查 js 文件是否存在
+    JS_FILE="$LOCAL_SCRIPT_DIR/脚本/geshihua.js"
+    if [ ! -f "$JS_FILE" ]; then
+        echo "❌ 错误: 找不到 $JS_FILE 文件，请检查路径！"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
+
+    echo "▶ 正在执行 geshihua.js 格式化文档..."
+    echo "------------------------------------------"
+    # 调用 node 执行这个 js 文件
+    if node "$JS_FILE"; then
+        echo "------------------------------------------"
+        echo "✅ 格式化执行完毕！"
+    else
+        echo "------------------------------------------"
+        echo "❌ 格式化执行失败，请检查 geshihua.js 的代码逻辑。"
+    fi
+    read -p "按回车键返回主菜单..."
+}
+
 # ================= 主菜单循环 =================
 
 while true; do
@@ -144,10 +177,11 @@ while true; do
     echo "  3. 撤回上一次提交 (彻底回退)"
     echo "  4. 撤回特定提交 (彻底回退)"
     echo "  5. 手动从远程更新 (git pull)"
-    echo "  6. 退出"
+    echo "  6. 运行 geshihua.js (格式化)"
+    echo "  7. 退出"
     echo "=========================================="
 
-    read -p "请选择操作 (1-6): " CHOICE
+    read -p "请选择操作 (1-7): " CHOICE
 
     case $CHOICE in
         1) do_commit ;;
@@ -155,7 +189,8 @@ while true; do
         3) do_revert_last ;;
         4) do_revert_specific ;;
         5) do_update ;;
-        6) echo "👋 再见！"; exit 0 ;;
+        6) do_format ;;
+        7) echo "👋 再见！"; exit 0 ;;
         *) echo "❌ 无效的选项，请重新选择。" ;;
     esac
 done
