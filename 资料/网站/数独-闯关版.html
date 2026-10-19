@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>数独 · 闯关版</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      background: radial-gradient(circle at 50% 30%, #1a1e2e 0%, #0b0d14 100%);
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      display: flex; justify-content: center; align-items: center;
+      padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .game-container {
+      position: relative; display: flex; flex-direction: column; align-items: center;
+      width: 100%; max-width: 460px;
+      animation: floatUp 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+    }
+    @keyframes floatUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ===== HUD ===== */
+    .hud {
+      display: flex; justify-content: space-between; align-items: center;
+      width: 100%; padding: 10px 16px; margin-bottom: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      color: #eef2ff; font-size: 0.9rem; letter-spacing: 0.3px;
+      flex-wrap: wrap; gap: 6px 12px;
+    }
+    .hud .level { font-weight: 700; background: linear-gradient(135deg, #8ab4ff, #c084fc);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .hud .timer { font-weight: 600; color: #ffd966; }
+    .hud .stars { font-weight: 600; color: #ffb84a; }
+    .hud .info { font-size: 0.8rem; color: #8892b0; }
+
+    /* ===== 棋盘 ===== */
+    .board-wrapper {
+      position: relative; width: 100%; aspect-ratio: 1 / 1; max-width: 440px;
+      background: #1a1e2e; border-radius: 24px; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(120, 150, 255, 0.15), 0 30px 50px -20px rgba(0, 0, 0, 0.9), 0 0 80px -20px rgba(80, 120, 255, 0.3);
+      touch-action: none;
+      padding: 10px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      grid-template-rows: repeat(9, 1fr);
+      width: 100%; height: 100%;
+      background: #12162a;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #2e3448;
+    }
+    .cell {
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700;
+      font-size: clamp(1rem, 4vw, 1.8rem);
+      color: #e0e8ff;
+      background: #1a1e2e;
+      border: 1px solid #2a3048;
+      transition: background 0.12s, box-shadow 0.12s;
+      cursor: pointer;
+      will-change: background;
+    }
+    /* 3x3 宫边界 */
+    .cell[data-col="2"], .cell[data-col="5"] {
+      border-right: 2px solid #4a5a8a;
+    }
+    .cell[data-row="2"], .cell[data-row="5"] {
+      border-bottom: 2px solid #4a5a8a;
+    }
+    .cell[data-col="0"] { border-left: 2px solid #4a5a8a; }
+    .cell[data-col="8"] { border-right: 2px solid #4a5a8a; }
+    .cell[data-row="0"] { border-top: 2px solid #4a5a8a; }
+    .cell[data-row="8"] { border-bottom: 2px solid #4a5a8a; }
+
+    /* 选中高亮 */
+    .cell.selected {
+      background: #2a3a6a;
+      box-shadow: inset 0 0 0 2px #6d8aff;
+      z-index: 2;
+    }
+    .cell.highlight {
+      background: #222a44;
+    }
+    .cell.same-number {
+      background: #2a2a5a;
+    }
+    .cell.given {
+      color: #aac0ff;
+      font-weight: 800;
+    }
+    .cell.error {
+      color: #ff6b6b;
+      background: #3a1a2a;
+    }
+    .cell.hinted {
+      color: #aaffaa;
+    }
+
+    /* 笔记 */
+    .notes-grid {
+      position: absolute; inset: 2px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      font-size: clamp(0.4rem, 1.5vw, 0.65rem);
+      color: #7a8ab0;
+      font-weight: 500;
+      pointer-events: none;
+    }
+    .notes-grid span {
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0.4;
+    }
+    .notes-grid span.active {
+      opacity: 1;
+      color: #aaccff;
+    }
+    .notes-grid span.struck {
+      opacity: 0.3;
+      text-decoration: line-through;
+    }
+
+    /* ===== 数字面板 ===== */
+    .numpad {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      width: 100%; max-width: 440px;
+      margin-top: 12px;
+      padding: 0 4px;
+    }
+    .num-btn {
+      aspect-ratio: 1 / 1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      color: #eef2ff; font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700;
+      cursor: pointer;
+      transition: 0.08s;
+      position: relative;
+      touch-action: manipulation;
+    }
+    .num-btn:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.12); }
+    .num-btn:disabled { opacity: 0.3; pointer-events: none; }
+    .num-btn .remain {
+      position: absolute; bottom: 2px;
+      font-size: 0.55rem; color: #8892b0; font-weight: 500;
+    }
+    .num-btn.notes-active {
+      background: rgba(255, 200, 80, 0.15);
+      border-color: rgba(255, 200, 80, 0.4);
+    }
+    .num-btn.erase { background: rgba(255, 100, 100, 0.12); border-color: rgba(255, 100, 100, 0.3); font-size: 1.2rem; }
+    .num-btn.notes { background: rgba(100, 200, 255, 0.12); border-color: rgba(100, 200, 255, 0.3); font-size: 1rem; }
+    .num-btn.hint { background: rgba(100, 255, 100, 0.1); border-color: rgba(100, 255, 100, 0.25); font-size: 1rem; }
+    .num-btn.undo { background: rgba(255, 200, 100, 0.1); border-color: rgba(255, 200, 100, 0.25); font-size: 1rem; }
+
+    .hint { margin-top: 8px; font-size: 0.72rem; color: #4f5a7a; text-align: center; }
+    @media (min-width: 768px) {
+      .hint::after { content: ' · 键盘 1-9 填数 · 方向键移动 · N 笔记 · U 撤销'; color: #5f6f92; }
+    }
+
+    /* 覆盖层 */
+    .overlay {
+      position: absolute; inset: 0;
+      background: rgba(5, 8, 18, 0.88);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border-radius: 24px;
+      opacity: 0; pointer-events: none; transition: opacity 0.25s;
+      padding: 20px;
+      z-index: 10;
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .overlay h2 {
+      margin: 0 0 8px; font-size: 1.8rem;
+      background: linear-gradient(135deg, #ffd966, #f0a030);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(255, 200, 80, 0.4);
+    }
+    .overlay p { margin: 4px 0; color: #b8c6ff; font-size: 1rem; }
+    .overlay .stars { font-size: 2rem; letter-spacing: 4px; margin: 10px 0; }
+    .overlay button {
+      margin-top: 16px; padding: 12px 32px;
+      background: linear-gradient(135deg, #4c7eff, #3a5fce);
+      border: none; border-radius: 14px; color: #fff;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+      box-shadow: 0 4px 0 #1e3b7a;
+      transition: 0.08s;
+    }
+    .overlay button:active { transform: translateY(2px); box-shadow: 0 2px 0 #1e3b7a; }
+  </style>
+</head>
+<body>
+<div class="game-container">
+  <div class="hud" id="hud">
+    <div class="level" id="levelDisplay">第 1 关</div>
+    <div class="timer" id="timerDisplay">00:00</div>
+    <div class="stars" id="starsDisplay">☆☆☆</div>
+    <div class="info" id="infoDisplay">简单</div>
+  </div>
+
+  <div class="board-wrapper" id="boardWrapper">
+    <div class="board" id="board"></div>
+    <div class="overlay" id="overlay">
+      <h2 id="overlayTitle">关卡完成</h2>
+      <p id="overlaySubtitle">用时 00:00</p>
+      <div class="stars" id="overlayStars">⭐⭐⭐</div>
+      <p id="overlayHint">点击继续</p>
+      <button id="overlayBtn">下一关</button>
+    </div>
+  </div>
+
+  <div class="numpad" id="numpad">
+    <!-- 由 JS 生成 -->
+  </div>
+  <div class="hint" id="hint">点击格子，再点数字填入</div>
+</div>
+
+<script>
+  (function() {
+    // ============================================================
+    // 固定关卡表（6 关，简单3 + 中等3）
+    // ============================================================
+    const LEVELS = [
+      {
+        id: 1, difficulty: '简单',
+        puzzle: '530070000600195000098000060800060003400803001700020006060000280000419005000080079',
+        solution: '534678912672195348198342567859761423426853791713924856961537284287419635345286179',
+        starTime: { three: 300, two: 600, one: 1200 }
+      },
+      {
+        id: 2, difficulty: '简单',
+        puzzle: '003020600900305001001806400008102900700000008006708200002609500800203009005010300',
+        solution: '483921657967345821251876493548132976729564138136798245372489567894253719615817394',
+        starTime: { three: 360, two: 720, one: 1440 }
+      },
+      {
+        id: 3, difficulty: '简单',
+        puzzle: '200080300060070084030500209000105408000000000402706000301007040720040060004010003',
+        solution: '245981376169273584837564219976125438513498627482736951391657842728349165654812793',
+        starTime: { three: 420, two: 840, one: 1680 }
+      },
+      {
+        id: 4, difficulty: '中等',
+        puzzle: '000000907000420180000705026100904000050000040000507009920108000034059000507000000',
+        solution: '483657291926431875571982643168294357759863412342715968295178436634529187817346529',
+        starTime: { three: 600, two: 1200, one: 2400 }
+      },
+      {
+        id: 5, difficulty: '中等',
+        puzzle: '030050040008010500460000012070502080000603000040109030250000098001020600080060020',
+        solution: '132657849758413562469289712573542186986731425241198637257346098691825374385964251',
+        starTime: { three: 720, two: 1440, one: 2880 }
+      },
+      {
+        id: 6, difficulty: '中等',
+        puzzle: '020810740700003100090002805009040087400208003160030200302700060005600008076051090',
+        solution: '325816749748973162691542875239154687487268953156739224573295461864127538912051090',
+        starTime: { three: 900, two: 1800, one: 3600 }
+      }
+    ];
+
+    // ============================================================
+    // 状态
+    // ============================================================
+    const state = {
+      levelIndex: 0,
+      level: null,
+      board: [],        // 9x9
+      given: [],        // 9x9
+      notes: [],        // 9x9，每个格子是 Set
+      selected: null,
+      notesMode: false,
+      history: [],
+      timer: 0,         // 秒
+      startTime: 0,
+      gameOver: false,
+      win: false,
+      transitioning: false,
+      usedHint: false,
+      hintsLeft: 3,
+      undoLeft: 50
+    };
+
+    // ============================================================
+    // DOM
+    // ============================================================
+    const boardEl = document.getElementById('board');
+    const numpadEl = document.getElementById('numpad');
+    const overlayEl = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlaySubtitle = document.getElementById('overlaySubtitle');
+    const overlayStars = document.getElementById('overlayStars');
+    const overlayHint = document.getElementById('overlayHint');
+    const overlayBtn = document.getElementById('overlayBtn');
+    const levelDisplay = document.getElementById('levelDisplay');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const starsDisplay = document.getElementById('starsDisplay');
+    const infoDisplay = document.getElementById('infoDisplay');
+
+    // ============================================================
+    // 初始化 DOM 棋盘
+    // ============================================================
+    function initBoardDOM() {
+      boardEl.innerHTML = '';
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.row = r;
+          cell.dataset.col = c;
+          cell.dataset.index = r * 9 + c;
+          cell.addEventListener('click', () => handleCellClick(r, c));
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    // ============================================================
+    // 数字面板
+    // ============================================================
+    function initNumpad() {
+      numpadEl.innerHTML = '';
+      // 1-9
+      for (let n = 1; n <= 9; n++) {
+        const btn = document.createElement('button');
+        btn.className = 'num-btn';
+        btn.dataset.num = n;
+        btn.innerHTML = `${n}<span class="remain" id="remain-${n}">9</span>`;
+        btn.addEventListener('click', () => handleNumberInput(n));
+        numpadEl.appendChild(btn);
+      }
+      // 擦除
+      const eraseBtn = document.createElement('button');
+      eraseBtn.className = 'num-btn erase';
+      eraseBtn.textContent = '✕';
+      eraseBtn.addEventListener('click', () => handleNumberInput(0));
+      numpadEl.appendChild(eraseBtn);
+      // 笔记
+      const notesBtn = document.createElement('button');
+      notesBtn.className = 'num-btn notes';
+      notesBtn.id = 'notesBtn';
+      notesBtn.textContent = '笔记';
+      notesBtn.addEventListener('click', toggleNotesMode);
+      numpadEl.appendChild(notesBtn);
+      // 撤销
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'num-btn undo';
+      undoBtn.id = 'undoBtn';
+      undoBtn.textContent = '撤销';
+      undoBtn.addEventListener('click', undo);
+      numpadEl.appendChild(undoBtn);
+      // 提示
+      const hintBtn = document.createElement('button');
+      hintBtn.className = 'num-btn hint';
+      hintBtn.id = 'hintBtn';
+      hintBtn.textContent = '💡';
+      hintBtn.addEventListener('click', useHint);
+      numpadEl.appendChild(hintBtn);
+    }
+
+    // ============================================================
+    // 关卡加载
+    // ============================================================
+    function loadLevel(index) {
+      state.levelIndex = index;
+      state.level = LEVELS[index];
+      const lv = state.level;
+
+      // 解析盘面
+      state.board = Array.from({ length: 9 }, () => Array(9).fill(0));
+      state.given = Array.from({ length: 9 }, () => Array(9).fill(false));
+      state.notes = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => new Set()));
+
+      for (let i = 0; i < 81; i++) {
+        const r = Math.floor(i / 9);
+        const c = i % 9;
+        const v = parseInt(lv.puzzle[i], 10);
+        state.board[r][c] = v;
+        state.given[r][c] = v !== 0;
+      }
+
+      // 重置状态
+      state.selected = null;
+      state.notesMode = false;
+      state.history = [];
+      state.timer = 0;
+      state.startTime = performance.now();
+      state.gameOver = false;
+      state.win = false;
+      state.transitioning = false;
+      state.usedHint = false;
+      state.hintsLeft = 3;
+      state.undoLeft = 50;
+
+      overlayEl.classList.remove('show');
+      updateHUD();
+      renderBoard();
+      updateNumpadRemaining();
+    }
+
+    // ============================================================
+    // 棋盘渲染
+    // ============================================================
+    function renderBoard() {
+      const cells = boardEl.children;
+      const sel = state.selected;
+
+      // 计算高亮范围
+      let highlightRows = new Set();
+      let highlightCols = new Set();
+      let highlightBox = new Set();
+      let selValue = 0;
+
+      if (sel) {
+        const { row, col } = sel;
+        const boxR = Math.floor(row / 3) * 3;
+        const boxC = Math.floor(col / 3) * 3;
+        for (let i = 0; i < 9; i++) {
+          highlightRows.add(i);
+          highlightCols.add(i);
+        }
+        for (let r = boxR; r < boxR + 3; r++) {
+          for (let c = boxC; c < boxC + 3; c++) {
+            highlightBox.add(r * 9 + c);
+          }
+        }
+        selValue = state.board[row][col];
+      }
+
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const idx = r * 9 + c;
+          const cell = cells[idx];
+          const val = state.board[r][c];
+          const isGiven = state.given[r][c];
+          const isSelected = sel && sel.row === r && sel.col === c;
+          const inHighlight = sel && (highlightRows.has(r) || highlightCols.has(c) || highlightBox.has(idx));
+          const isSameNum = selValue !== 0 && val === selValue && !isSelected;
+
+          // 冲突检测
+          let isError = false;
+          if (val !== 0) {
+            // 检查同行
+            for (let cc = 0; cc < 9; cc++) {
+              if (cc !== c && state.board[r][cc] === val) { isError = true; break; }
+            }
+            if (!isError) {
+              for (let rr = 0; rr < 9; rr++) {
+                if (rr !== r && state.board[rr][c] === val) { isError = true; break; }
+              }
+            }
+            if (!isError) {
+              const boxR = Math.floor(r / 3) * 3;
+              const boxC = Math.floor(c / 3) * 3;
+              for (let rr = boxR; rr < boxR + 3; rr++) {
+                for (let cc = boxC; cc < boxC + 3; cc++) {
+                  if ((rr !== r || cc !== c) && state.board[rr][cc] === val) { isError = true; break; }
+                }
+              }
+            }
+          }
+
+          // 设置类名
+          cell.className = 'cell';
+          if (isGiven) cell.classList.add('given');
+          if (isSelected) cell.classList.add('selected');
+          else if (inHighlight) cell.classList.add('highlight');
+          if (isSameNum) cell.classList.add('same-number');
+          if (isError) cell.classList.add('error');
+
+          // 内容
+          if (val !== 0) {
+            cell.textContent = val;
+            // 移除笔记
+            const noteEl = cell.querySelector('.notes-grid');
+            if (noteEl) noteEl.remove();
+          } else {
+            cell.textContent = '';
+            // 渲染笔记
+            const notes = state.notes[r][c];
+            if (notes.size > 0) {
+              let notesHTML = '<div class="notes-grid">';
+              for (let n = 1; n <= 9; n++) {
+                let cls = 'span';
+                if (notes.has(n)) {
+                  // 检查该数字是否已被同行/列/宫占用
+                  let occupied = false;
+                  for (let cc = 0; cc < 9; cc++) {
+                    if (state.board[r][cc] === n) { occupied = true; break; }
+                  }
+                  if (!occupied) {
+                    for (let rr = 0; rr < 9; rr++) {
+                      if (state.board[rr][c] === n) { occupied = true; break; }
+                    }
+                  }
+                  if (!occupied) {
+                    const boxR = Math.floor(r / 3) * 3;
+                    const boxC = Math.floor(c / 3) * 3;
+                    for (let rr = boxR; rr < boxR + 3; rr++) {
+                      for (let cc = boxC; cc < boxC + 3; cc++) {
+                        if (state.board[rr][cc] === n) { occupied = true; break; }
+                      }
+                    }
+                  }
+                  cls = occupied ? 'struck' : 'active';
+                }
+                notesHTML += `<span class="${cls}">${notes.has(n) ? n : ''}</span>`;
+              }
+              notesHTML += '</div>';
+              cell.innerHTML = notesHTML;
+            }
+          }
+        }
+      }
+
+      // 更新笔记模式按钮
+      const notesBtn = document.getElementById('notesBtn');
+      if (notesBtn) {
+        notesBtn.classList.toggle('notes-active', state.notesMode);
+        notesBtn.textContent = state.notesMode ? '笔记✓' : '笔记';
+      }
+
+      // 撤销按钮
+      const undoBtn = document.getElementById('undoBtn');
+      if (undoBtn) {
+        undoBtn.disabled = state.undoLeft <= 0 || state.history.length === 0;
+        undoBtn.textContent = `撤销(${state.undoLeft})`;
+      }
+
+      // 提示按钮
+      const hintBtn = document.getElementById('hintBtn');
+      if (hintBtn) {
+        hintBtn.disabled = state.hintsLeft <= 0;
+        hintBtn.textContent = `💡${state.hintsLeft}`;
+      }
+
+      updateNumpadRemaining();
+    }
+
+    // ============================================================
+    // 更新数字面板剩余数量
+    // ============================================================
+    function updateNumpadRemaining() {
+      for (let n = 1; n <= 9; n++) {
+        let count = 0;
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (state.board[r][c] === n) count++;
+          }
+        }
+        const remain = 9 - count;
+        const el = document.getElementById(`remain-${n}`);
+        if (el) el.textContent = remain;
+        const btn = document.querySelector(`.num-btn[data-num="${n}"]`);
+        if (btn) btn.disabled = remain <= 0;
+      }
+    }
+
+    // ============================================================
+    // 格子点击
+    // ============================================================
+    function handleCellClick(r, c) {
+      if (state.gameOver || state.win || state.transitioning) return;
+      if (state.given[r][c]) {
+        // 点击提示数仍然可以高亮
+      }
+      state.selected = { row: r, col: c };
+      renderBoard();
+      playTone(600, 0.03, 'sine', 0.02);
+    }
+
+    // ============================================================
+    // 数字输入
+    // ============================================================
+    function handleNumberInput(num) {
+      if (!state.selected || state.gameOver || state.win || state.transitioning) return;
+      const { row, col } = state.selected;
+      if (state.given[row][col]) return;
+
+      // 保存历史
+      pushHistory();
+
+      if (state.notesMode) {
+        // 笔记模式
+        if (num === 0) {
+          state.notes[row][col].clear();
+        } else {
+          if (state.notes[row][col].has(num)) {
+            state.notes[row][col].delete(num);
+          } else {
+            state.notes[row][col].add(num);
+          }
+        }
+      } else {
+        // 填数模式
+        if (num === 0) {
+          state.board[row][col] = 0;
+        } else {
+          if (state.board[row][col] === num) {
+            state.board[row][col] = 0; // 再次点击取消
+          } else {
+            state.board[row][col] = num;
+            // 清除该格笔记
+            state.notes[row][col].clear();
+            // 自动从同行/列/宫的笔记中移除
+            removeNoteFromPeers(row, col, num);
+            playTone(800, 0.05, 'sine', 0.03);
+          }
+        }
+      }
+
+      renderBoard();
+      checkWin();
+      updateHUD();
+    }
+
+    function removeNoteFromPeers(row, col, num) {
+      for (let c = 0; c < 9; c++) {
+        if (c !== col) state.notes[row][c].delete(num);
+      }
+      for (let r = 0; r < 9; r++) {
+        if (r !== row) state.notes[r][col].delete(num);
+      }
+      const boxR = Math.floor(row / 3) * 3;
+      const boxC = Math.floor(col / 3) * 3;
+      for (let r = boxR; r < boxR + 3; r++) {
+        for (let c = boxC; c < boxC + 3; c++) {
+          if (r !== row || c !== col) state.notes[r][c].delete(num);
+        }
+      }
+    }
+
+    // ============================================================
+    // 撤销
+    // ============================================================
+    function pushHistory() {
+      const snapshot = {
+        board: state.board.map(r => [...r]),
+        notes: state.notes.map(r => r.map(s => new Set(s)))
+      };
+      state.history.push(snapshot);
+      if (state.history.length > 100) state.history.shift();
+      state.undoLeft--;
+    }
+
+    function undo() {
+      if (state.history.length === 0 || state.undoLeft < 0) return;
+      const prev = state.history.pop();
+      state.board = prev.board;
+      state.notes = prev.notes;
+      state.undoLeft++;
+      renderBoard();
+      playTone(400, 0.06, 'sine', 0.03);
+    }
+
+    // ============================================================
+    // 笔记模式
+    // ============================================================
+    function toggleNotesMode() {
+      state.notesMode = !state.notesMode;
+      renderBoard();
+      playTone(500, 0.04, 'sine', 0.02);
+    }
+
+    // ============================================================
+    // 提示
+    // ============================================================
+    function useHint() {
+      if (state.hintsLeft <= 0 || state.gameOver || state.win) return;
+      if (!state.selected) return;
+      const { row, col } = state.selected;
+      if (state.given[row][col]) return;
+
+      const solution = state.level.solution;
+      const correct = parseInt(solution[row * 9 + col], 10);
+      if (state.board[row][col] === correct) return;
+
+      state.board[row][col] = correct;
+      state.notes[row][col].clear();
+      removeNoteFromPeers(row, col, correct);
+      state.hintsLeft--;
+      state.usedHint = true;
+
+      // 标记为提示
+      const cell = boardEl.children[row * 9 + col];
+      if (cell) cell.classList.add('hinted');
+
+      renderBoard();
+      checkWin();
+      updateHUD();
+      playTone(1000, 0.1, 'sine', 0.05);
+    }
+
+    // ============================================================
+    // 检查胜利
+    // ============================================================
+    function checkWin() {
+      // 检查是否填满
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          if (state.board[r][c] === 0) return;
+        }
+      }
+      // 检查是否有冲突
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const val = state.board[r][c];
+          if (val === 0) return;
+          // 检查冲突
+          for (let cc = 0; cc < 9; cc++) {
+            if (cc !== c && state.board[r][cc] === val) return;
+          }
+          for (let rr = 0; rr < 9; rr++) {
+            if (rr !== r && state.board[rr][c] === val) return;
+          }
+          const boxR = Math.floor(r / 3) * 3;
+          const boxC = Math.floor(c / 3) * 3;
+          for (let rr = boxR; rr < boxR + 3; rr++) {
+            for (let cc = boxC; cc < boxC + 3; cc++) {
+              if ((rr !== r || cc !== c) && state.board[rr][cc] === val) return;
+            }
+          }
+        }
+      }
+
+      // 胜利
+      state.win = true;
+      state.transitioning = true;
+      const elapsed = Math.floor((performance.now() - state.startTime) / 1000);
+      state.timer = elapsed;
+
+      let stars = 1;
+      const th = state.level.starTime;
+      if (elapsed <= th.three) stars = 3;
+      else if (elapsed <= th.two) stars = 2;
+      if (state.usedHint) stars = Math.max(1, stars - 1);
+
+      // 保存进度
+      saveProgress(state.levelIndex, stars, elapsed);
+
+      // 显示结算
+      overlayTitle.textContent = '🎉 关卡完成！';
+      overlaySubtitle.textContent = `用时 ${formatTime(elapsed)}`;
+      overlayStars.textContent = '⭐'.repeat(stars) + '☆'.repeat(3 - stars);
+      overlayHint.textContent = `三星目标 ${formatTime(th.three)}`;
+      overlayBtn.textContent = state.levelIndex + 1 < LEVELS.length ? '下一关' : '完成';
+      overlayEl.classList.add('show');
+
+      playTone(1200, 0.3, 'sine', 0.08);
+      updateHUD();
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // ============================================================
+    // HUD
+    // ============================================================
+    function updateHUD() {
+      const lv = state.level;
+      if (!lv) return;
+      levelDisplay.textContent = `第 ${lv.id} 关`;
+      infoDisplay.textContent = lv.difficulty;
+
+      // 计时
+      if (!state.win && !state.gameOver && !state.transitioning) {
+        state.timer = Math.floor((performance.now() - state.startTime) / 1000);
+      }
+      timerDisplay.textContent = formatTime(state.timer);
+
+      // 星级预览
+      let stars = 1;
+      const th = lv.starTime;
+      if (state.timer <= th.three) stars = 3;
+      else if (state.timer <= th.two) stars = 2;
+      starsDisplay.textContent = '⭐'.repeat(stars) + '☆'.repeat(3 - stars);
+    }
+
+    // ============================================================
+    // 进度存储
+    // ============================================================
+    function saveProgress(levelIndex, stars, time) {
+      try {
+        const key = 'sudoku-progress-v1';
+        const data = JSON.parse(localStorage.getItem(key) || '{}');
+        const id = state.level.id;
+        if (!data[id] || data[id].stars < stars || data[id].bestTime > time) {
+          data[id] = { stars: Math.max(data[id]?.stars || 0, stars), bestTime: Math.min(data[id]?.bestTime || Infinity, time) };
+          localStorage.setItem(key, JSON.stringify(data));
+        }
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // 音频
+    // ============================================================
+    let audioCtx = null;
+    function initAudio() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) {}
+    }
+    window.addEventListener('pointerdown', initAudio, { once: false });
+
+    function playTone(freq, duration, type, volume) {
+      if (!audioCtx || audioCtx.state !== 'running') return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        gain.gain.value = volume || 0.06;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // 键盘输入
+    // ============================================================
+    window.addEventListener('keydown', (e) => {
+      if (state.gameOver || state.win || state.transitioning) return;
+
+      // 数字 1-9
+      if (e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        handleNumberInput(parseInt(e.key, 10));
+        return;
+      }
+      // 退格 / Delete
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        handleNumberInput(0);
+        return;
+      }
+      // N 笔记
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        toggleNotesMode();
+        return;
+      }
+      // U 撤销
+      if (e.key === 'u' || e.key === 'U') {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      // 方向键移动选中
+      if (state.selected) {
+        let { row, col } = state.selected;
+        if (e.key === 'ArrowUp') { e.preventDefault(); row = Math.max(0, row - 1); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); row = Math.min(8, row + 1); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); col = Math.max(0, col - 1); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); col = Math.min(8, col + 1); }
+        else return;
+        state.selected = { row, col };
+        renderBoard();
+      }
+    });
+
+    // ============================================================
+    // 覆盖层按钮
+    // ============================================================
+    overlayBtn.addEventListener('click', () => {
+      if (state.win) {
+        if (state.levelIndex + 1 < LEVELS.length) {
+          loadLevel(state.levelIndex + 1);
+        } else {
+          loadLevel(0);
+        }
+      }
+      overlayEl.classList.remove('show');
+    });
+
+    // ============================================================
+    // 主循环（只更新计时器）
+    // ============================================================
+    let lastTime = performance.now();
+    function gameLoop(now) {
+      if (!state.win && !state.gameOver && !state.transitioning && state.level) {
+        const elapsed = Math.floor((now - state.startTime) / 1000);
+        if (elapsed !== state.timer) {
+          state.timer = elapsed;
+          timerDisplay.textContent = formatTime(state.timer);
+          // 更新星级预览
+          const th = state.level.starTime;
+          let stars = 1;
+          if (state.timer <= th.three) stars = 3;
+          else if (state.timer <= th.two) stars = 2;
+          starsDisplay.textContent = '⭐'.repeat(stars) + '☆'.repeat(3 - stars);
+        }
+      }
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ============================================================
+    // 启动
+    // ============================================================
+    initBoardDOM();
+    initNumpad();
+    loadLevel(0);
+    requestAnimationFrame(gameLoop);
+
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('touchmove', (e) => {
+      if (e.target.closest('.board-wrapper')) e.preventDefault();
+    }, { passive: false });
+
+  })();
+</script>
+</body>
+</html>

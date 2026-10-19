@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>黄金矿工</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      background: radial-gradient(circle at 50% 30%, #1a1e2e 0%, #0b0d14 100%);
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      display: flex; justify-content: center; align-items: center;
+      padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .game-container {
+      position: relative; display: flex; flex-direction: column; align-items: center;
+      width: 100%; max-width: 440px;
+      animation: floatUp 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+    }
+    @keyframes floatUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    .hud {
+      display: flex; justify-content: space-between; align-items: center;
+      width: 100%; padding: 10px 18px; margin-bottom: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      color: #eef2ff; font-size: 0.9rem; letter-spacing: 0.3px;
+    }
+    .hud .level { font-weight: 700; background: linear-gradient(135deg, #ffd966, #f0a030);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .hud .score { font-weight: 600; color: #ffd966; }
+    .hud .target { font-weight: 500; color: #b8c6ff; }
+    .hud .time { font-weight: 600; color: #ff8a8a; }
+
+    .canvas-wrapper {
+      position: relative; width: 100%; aspect-ratio: 3 / 4; max-width: 440px;
+      background: #0a0c14; border-radius: 24px; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(255, 200, 100, 0.15), 0 30px 50px -20px rgba(0, 0, 0, 0.9), 0 0 80px -20px rgba(255, 180, 50, 0.2);
+    }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    .controls {
+      display: flex; gap: 12px; margin-top: 14px; width: 100%; justify-content: center;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .ctrl-btn {
+      flex: 1; max-width: 140px; padding: 14px 0;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 16px; color: #eef2ff; font-size: 1.1rem; font-weight: 700;
+      letter-spacing: 1px; cursor: pointer;
+      box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
+      transition: 0.08s; touch-action: manipulation;
+    }
+    .ctrl-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+    .ctrl-btn.shoot { background: rgba(100, 200, 255, 0.2); border-color: rgba(100, 200, 255, 0.4); color: #aaddff; }
+    .ctrl-btn.bomb { background: rgba(255, 100, 100, 0.15); border-color: rgba(255, 100, 100, 0.35); color: #ffaaaa; }
+    .ctrl-btn:disabled { opacity: 0.35; pointer-events: none; }
+
+    .hint { margin-top: 8px; font-size: 0.72rem; color: #4f5a7a; text-align: center; }
+    @media (min-width: 768px) {
+      .controls { display: none; }
+      .hint::after { content: ' · 键盘 ↓/空格 发射 · ↑ 炸药'; color: #5f6f92; }
+    }
+  </style>
+</head>
+<body>
+<div class="game-container">
+  <div class="hud">
+    <div class="level" id="levelDisplay">第 1 关</div>
+    <div class="target" id="targetDisplay">目标 650</div>
+    <div class="score" id="scoreDisplay">0</div>
+    <div class="time" id="timeDisplay">60s</div>
+  </div>
+
+  <div class="canvas-wrapper">
+    <canvas id="gameCanvas"></canvas>
+  </div>
+
+  <div class="controls" id="controls">
+    <button class="ctrl-btn shoot" id="btnShoot">发射</button>
+    <button class="ctrl-btn bomb" id="btnBomb" disabled>炸药</button>
+  </div>
+  <div class="hint" id="hint">点击发射钩爪 · 抓取金块得分</div>
+</div>
+
+<script>
+  (function() {
+    const LOGIC_W = 480;
+    const LOGIC_H = 640;
+    const FIXED_STEP = 1000 / 60;
+    const MAX_FRAME_TIME = 250;
+
+    const MAX_ANGLE = 60 * Math.PI / 180;
+    const SWING_SPEED = 1.6;
+    const HOOK_SHOOT_SPEED = 380;
+    const HOOK_RETRACT_BASE = 260;
+    const HOOK_RADIUS = 14;
+    const HOOK_ORIGIN_X = LOGIC_W / 2;
+    const HOOK_ORIGIN_Y = 110;
+    const ROPE_LENGTH = 60;
+
+    const ITEM_TYPES = {
+      gold_large: { name: '大金块', value: 500, weight: 4, color: '#f0c040', radius: 26, shape: 'goldbar' },
+      gold_small: { name: '小金块', value: 100, weight: 1, color: '#e8b830', radius: 18, shape: 'coin' },
+      diamond:   { name: '钻石',   value: 600, weight: 0.8, color: '#88ddff', radius: 14, shape: 'diamond' },
+      rock:      { name: '石头',   value: 20,  weight: 8, color: '#7a7a8a', radius: 24, shape: 'rock' },
+      bag:       { name: '布袋',   value: 0,   weight: 1.5, color: '#a07850', radius: 18, shape: 'bag' },
+      tnt:       { name: '炸药桶', value: 0,   weight: 0, color: '#ff6b4a', radius: 18, shape: 'tnt' }
+    };
+
+    const LEVELS = [
+      { target: 650, time: 60, items: [
+        { type: 'gold_large', count: 2 }, { type: 'gold_small', count: 3 },
+        { type: 'diamond', count: 1 }, { type: 'rock', count: 4 }, { type: 'bag', count: 1 }
+      ]},
+      { target: 1100, time: 60, items: [
+        { type: 'gold_large', count: 3 }, { type: 'gold_small', count: 2 },
+        { type: 'diamond', count: 2 }, { type: 'rock', count: 5 }, { type: 'bag', count: 1 }, { type: 'tnt', count: 1 }
+      ]},
+      { target: 1800, time: 65, items: [
+        { type: 'gold_large', count: 4 }, { type: 'gold_small', count: 3 },
+        { type: 'diamond', count: 2 }, { type: 'rock', count: 6 }, { type: 'bag', count: 2 }, { type: 'tnt', count: 1 }
+      ]},
+      { target: 2600, time: 65, items: [
+        { type: 'gold_large', count: 5 }, { type: 'gold_small', count: 4 },
+        { type: 'diamond', count: 3 }, { type: 'rock', count: 7 }, { type: 'bag', count: 2 }, { type: 'tnt', count: 2 }
+      ]},
+      { target: 3500, time: 70, items: [
+        { type: 'gold_large', count: 6 }, { type: 'gold_small', count: 5 },
+        { type: 'diamond', count: 4 }, { type: 'rock', count: 8 }, { type: 'bag', count: 3 }, { type: 'tnt', count: 2 }
+      ]}
+    ];
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function setupCanvasDPR() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = LOGIC_W * dpr;
+      canvas.height = LOGIC_H * dpr;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+    setupCanvasDPR();
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => setupCanvasDPR(), 100);
+    });
+
+    let audioCtx = null;
+    let audioUnlocked = false;
+    function initAudio() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        audioUnlocked = true;
+      } catch (e) {}
+    }
+    window.addEventListener('pointerdown', function unlock() {
+      initAudio();
+      if (audioUnlocked) window.removeEventListener('pointerdown', unlock);
+    }, { once: false });
+
+    function playTone(freq = 440, duration = 0.08, type = 'sine', volume = 0.06) {
+      if (!audioCtx || audioCtx.state !== 'running') return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type; osc.frequency.value = freq; gain.gain.value = volume;
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    const InputManager = {
+      action: null,
+      consume() { const a = this.action; this.action = null; return a; },
+      shoot() { this.action = 'shoot'; },
+      bomb() { this.action = 'bomb'; }
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === ' ') {
+        e.preventDefault();
+        InputManager.shoot();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        InputManager.bomb();
+      }
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      InputManager.shoot();
+    });
+
+    const btnShoot = document.getElementById('btnShoot');
+    const btnBomb = document.getElementById('btnBomb');
+    btnShoot.addEventListener('pointerdown', (e) => { e.preventDefault(); InputManager.shoot(); });
+    btnBomb.addEventListener('pointerdown', (e) => { e.preventDefault(); InputManager.bomb(); });
+
+    const HOOK_STATE = { SWINGING: 'SWINGING', SHOOTING: 'SHOOTING', RETRACTING: 'RETRACTING' };
+
+    const bgStars = [];
+    const bgVeins = [];
+    for (let i = 0; i < 40; i++) {
+      bgStars.push({
+        x: Math.random() * LOGIC_W,
+        y: 160 + Math.random() * (LOGIC_H - 200),
+        r: 0.5 + Math.random() * 1.3,
+        a: 0.15 + Math.random() * 0.35,
+        tw: Math.random() * Math.PI * 2
+      });
+    }
+    for (let i = 0; i < 4; i++) {
+      const y = 220 + i * 100;
+      bgVeins.push({
+        y,
+        amp: 6 + Math.random() * 8,
+        freq: 0.006 + Math.random() * 0.004,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+
+    const game = {
+      levelIndex: 0,
+      config: null,
+      score: 0,
+      timeLeft: 0,
+      gameOver: false,
+      win: false,
+      transitioning: false,
+      allComplete: false,
+      state: HOOK_STATE.SWINGING,
+
+      angle: 0,
+      angleDir: 1,
+      shootLength: 0,
+      maxShootLength: 0,
+      caughtItem: null,
+      bombCount: 1,
+
+      items: [],
+      particles: [],
+      floatTexts: [],
+      sparkles: [],
+      hookTrail: [],
+      bgTime: 0,
+
+      loadLevel(index) {
+        if (index < 0 || index >= LEVELS.length) {
+          this.allComplete = true;
+          return;
+        }
+        this.levelIndex = index;
+        this.config = LEVELS[index];
+        this.score = 0;
+        this.timeLeft = this.config.time;
+        this.gameOver = false;
+        this.win = false;
+        this.transitioning = false;
+        this.allComplete = false;
+        this.state = HOOK_STATE.SWINGING;
+        this.angle = 0;
+        this.angleDir = 1;
+        this.shootLength = ROPE_LENGTH;
+        this.caughtItem = null;
+        this.bombCount = 1;
+        this.particles = [];
+        this.floatTexts = [];
+        this.sparkles = [];
+        this.hookTrail = [];
+        this.bgTime = 0;
+
+        this.items = [];
+        const minY = 220;
+        const maxY = LOGIC_H - 70;
+        const minX = 70;
+        const maxX = LOGIC_W - 70;
+        const placed = [];
+
+        this.config.items.forEach(itemCfg => {
+          for (let i = 0; i < itemCfg.count; i++) {
+            const def = ITEM_TYPES[itemCfg.type];
+            let x, y, tries = 0;
+            do {
+              x = minX + Math.random() * (maxX - minX);
+              y = minY + Math.random() * (maxY - minY);
+              tries++;
+            } while (tries < 200 && placed.some(p =>
+              Math.hypot(p.x - x, p.y - y) < p.radius + def.radius + 18
+            ));
+
+            placed.push({ x, y, radius: def.radius });
+            this.items.push({
+              type: itemCfg.type,
+              x, y,
+              radius: def.radius,
+              value: def.value,
+              weight: def.weight,
+              color: def.color,
+              shape: def.shape,
+              active: true,
+              sparklePhase: Math.random() * Math.PI * 2
+            });
+          }
+        });
+
+        this.items.forEach(it => {
+          if (it.shape === 'goldbar' || it.shape === 'coin' || it.shape === 'diamond') {
+            for (let i = 0; i < 2; i++) {
+              this.sparkles.push({
+                x: it.x, y: it.y,
+                baseX: it.x, baseY: it.y,
+                r: it.radius,
+                phase: Math.random() * Math.PI * 2,
+                speed: 0.5 + Math.random() * 1.2,
+                size: 1.5 + Math.random() * 2.5
+              });
+            }
+          }
+        });
+
+        updateHUD();
+      },
+
+      update(dt) {
+        this.bgTime += dt / 1000;
+
+        if (this.gameOver || this.win || this.allComplete) {
+          this.updateParticles();
+          this.updateFloatTexts();
+          this.updateSparkles();
+          return;
+        }
+        if (this.transitioning) {
+          this.updateParticles();
+          this.updateFloatTexts();
+          this.updateSparkles();
+          return;
+        }
+
+        this.timeLeft -= dt / 1000;
+        if (this.timeLeft <= 0) {
+          this.timeLeft = 0;
+          this.gameOver = true;
+          playTone(180, 0.4, 'sawtooth', 0.08);
+          updateHUD();
+          return;
+        }
+
+        const action = InputManager.consume();
+        if (action === 'shoot' && this.state === HOOK_STATE.SWINGING) {
+          this.state = HOOK_STATE.SHOOTING;
+          this.shootLength = ROPE_LENGTH;
+          this.maxShootLength = LOGIC_H - HOOK_ORIGIN_Y - 30;
+          this.hookTrail = [];
+          playTone(440, 0.1, 'square', 0.04);
+        } else if (action === 'bomb' && this.state === HOOK_STATE.RETRACTING && this.caughtItem && this.bombCount > 0) {
+          this.bombCount--;
+          this.explodeCaught();
+        }
+
+        if (this.state === HOOK_STATE.SWINGING) {
+          this.angle += SWING_SPEED * this.angleDir * dt / 1000;
+          if (this.angle > MAX_ANGLE) { this.angle = MAX_ANGLE; this.angleDir = -1; }
+          if (this.angle < -MAX_ANGLE) { this.angle = -MAX_ANGLE; this.angleDir = 1; }
+        } else if (this.state === HOOK_STATE.SHOOTING) {
+          this.shootLength += HOOK_SHOOT_SPEED * dt / 1000;
+          const endX = HOOK_ORIGIN_X + Math.sin(this.angle) * this.shootLength;
+          const endY = HOOK_ORIGIN_Y + Math.cos(this.angle) * this.shootLength;
+
+          this.hookTrail.push({ x: endX, y: endY, life: 1 });
+          if (this.hookTrail.length > 8) this.hookTrail.shift();
+
+          if (this.shootLength >= this.maxShootLength || endY > LOGIC_H - 20) {
+            this.state = HOOK_STATE.RETRACTING;
+          }
+
+          for (let item of this.items) {
+            if (!item.active) continue;
+            const dx = endX - item.x;
+            const dy = endY - item.y;
+            if (Math.sqrt(dx * dx + dy * dy) < HOOK_RADIUS + item.radius) {
+              this.caughtItem = item;
+              item.active = false;
+              this.state = HOOK_STATE.RETRACTING;
+              playTone(880, 0.1, 'sine', 0.05);
+              break;
+            }
+          }
+        } else if (this.state === HOOK_STATE.RETRACTING) {
+          let speed = HOOK_RETRACT_BASE;
+          if (this.caughtItem) {
+            speed = HOOK_RETRACT_BASE / (1 + this.caughtItem.weight * 0.6);
+          }
+          this.shootLength -= speed * dt / 1000;
+
+          const curX = HOOK_ORIGIN_X + Math.sin(this.angle) * this.shootLength;
+          const curY = HOOK_ORIGIN_Y + Math.cos(this.angle) * this.shootLength;
+          this.hookTrail.push({ x: curX, y: curY, life: 1 });
+          if (this.hookTrail.length > 8) this.hookTrail.shift();
+
+          if (this.shootLength <= ROPE_LENGTH) {
+            this.shootLength = ROPE_LENGTH;
+            if (this.caughtItem) {
+              this.score += this.caughtItem.value;
+              this.addFloatText(this.caughtItem.x, this.caughtItem.y, '+' + this.caughtItem.value, '#ffd966');
+              this.spawnParticles(this.caughtItem.x, this.caughtItem.y, '#ffd966', 10);
+              playTone(1200, 0.15, 'sine', 0.06);
+              this.caughtItem = null;
+            }
+            this.state = HOOK_STATE.SWINGING;
+            this.angleDir = 1;
+            this.hookTrail = [];
+          }
+        }
+
+        for (let i = this.hookTrail.length - 1; i >= 0; i--) {
+          this.hookTrail[i].life -= 0.08;
+          if (this.hookTrail[i].life <= 0) this.hookTrail.splice(i, 1);
+        }
+
+        if (this.score >= this.config.target && !this.win && !this.gameOver) {
+          this.win = true;
+          this.transitioning = true;
+          playTone(1300, 0.2, 'sine', 0.08);
+          setTimeout(() => {
+            if (this.levelIndex + 1 < LEVELS.length) {
+              this.loadLevel(this.levelIndex + 1);
+            } else {
+              this.allComplete = true;
+              this.transitioning = false;
+            }
+            updateHUD();
+          }, 1500);
+        }
+
+        this.updateParticles();
+        this.updateFloatTexts();
+        this.updateSparkles();
+        updateHUD();
+      },
+
+      updateSparkles() {
+        this.sparkles.forEach(sp => {
+          sp.phase += 0.02 * sp.speed;
+        });
+      },
+
+      explodeCaught() {
+        if (!this.caughtItem) return;
+        const item = this.caughtItem;
+        this.addFloatText(item.x, item.y, '💥', '#ff6b4a');
+        this.spawnParticles(item.x, item.y, '#ff6b4a', 14);
+        this.caughtItem = null;
+        this.state = HOOK_STATE.RETRACTING;
+        playTone(200, 0.3, 'sawtooth', 0.1);
+      },
+
+      addFloatText(x, y, text, color) {
+        this.floatTexts.push({ x, y, text, color, life: 1.2, vy: -0.6 });
+      },
+
+      updateFloatTexts() {
+        for (let i = this.floatTexts.length - 1; i >= 0; i--) {
+          const ft = this.floatTexts[i];
+          ft.y += ft.vy;
+          ft.life -= 0.016;
+          if (ft.life <= 0) this.floatTexts.splice(i, 1);
+        }
+      },
+
+      spawnParticles(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 1.5 + Math.random() * 4;
+          this.particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1.0, color,
+            size: 2 + Math.random() * 4
+          });
+        }
+      },
+
+      updateParticles() {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const p = this.particles[i];
+          p.x += p.vx; p.y += p.vy; p.vy += 0.08;
+          p.life -= 0.02;
+          if (p.life <= 0) this.particles.splice(i, 1);
+        }
+      },
+
+      render(ctx) {
+        this.drawBackground(ctx);
+        this.drawItems(ctx);
+        this.drawHook(ctx);
+        this.drawParticles(ctx);
+        this.drawFloatTexts(ctx);
+        this.drawOverlay(ctx);
+      },
+
+      drawBackground(ctx) {
+        const grad = ctx.createRadialGradient(
+          LOGIC_W / 2, LOGIC_H * 0.3, 20,
+          LOGIC_W / 2, LOGIC_H * 0.7, LOGIC_H
+        );
+        grad.addColorStop(0, '#1a1e2e');
+        grad.addColorStop(0.6, '#0d1018');
+        grad.addColorStop(1, '#05070c');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, LOGIC_W, LOGIC_H);
+
+        ctx.strokeStyle = 'rgba(80, 100, 140, 0.05)';
+        ctx.lineWidth = 1;
+        bgVeins.forEach(v => {
+          ctx.beginPath();
+          for (let x = 0; x <= LOGIC_W; x += 8) {
+            const y = v.y + Math.sin(x * v.freq + v.phase) * v.amp;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        });
+
+        bgStars.forEach(s => {
+          const tw = 0.6 + 0.4 * Math.sin(this.bgTime * 2 + s.tw);
+          ctx.globalAlpha = s.a * tw;
+          ctx.fillStyle = '#9db8ff';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = 'rgba(60, 50, 40, 0.55)';
+        ctx.beginPath();
+        ctx.roundRect(LOGIC_W / 2 - 80, 70, 160, 14, 7);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 200, 100, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(LOGIC_W / 2 - 80, 70, 160, 14, 7);
+        ctx.stroke();
+
+        this.drawMiner(ctx);
+      },
+
+      // ===== 满头白发的老矿工 =====
+      drawMiner(ctx) {
+        const cx = LOGIC_W / 2;
+        const footY = 82;
+
+        // 靴子
+        ctx.fillStyle = '#2a2018';
+        ctx.beginPath();
+        ctx.roundRect(cx - 14, footY - 7, 12, 7, [3, 3, 5, 5]);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.roundRect(cx + 2, footY - 7, 12, 7, [3, 3, 5, 5]);
+        ctx.fill();
+
+        // 裤腿
+        ctx.fillStyle = '#3a4a6a';
+        ctx.beginPath();
+        ctx.roundRect(cx - 12, footY - 22, 9, 16, [3, 3, 0, 0]);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.roundRect(cx + 3, footY - 22, 9, 16, [3, 3, 0, 0]);
+        ctx.fill();
+
+        // 身体
+        const bodyTop = footY - 42;
+        const bodyH = 22;
+        const bodyW = 30;
+
+        ctx.fillStyle = '#4a5a7a';
+        ctx.beginPath();
+        ctx.roundRect(cx - bodyW / 2, bodyTop, bodyW, bodyH, [7, 7, 2, 2]);
+        ctx.fill();
+
+        // 工装背带
+        ctx.strokeStyle = '#6a7a9a';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - 9, bodyTop + 1);
+        ctx.lineTo(cx - 5, bodyTop + bodyH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + 9, bodyTop + 1);
+        ctx.lineTo(cx + 5, bodyTop + bodyH);
+        ctx.stroke();
+
+        // 腰带
+        ctx.fillStyle = '#8a6a3a';
+        ctx.fillRect(cx - bodyW / 2, bodyTop + bodyH - 5, bodyW, 5);
+        ctx.fillStyle = '#d0a040';
+        ctx.fillRect(cx - 3, bodyTop + bodyH - 5, 6, 5);
+
+        // 手臂
+        const armY = bodyTop + 4;
+        ctx.fillStyle = '#4a5a7a';
+        ctx.beginPath();
+        ctx.roundRect(cx - bodyW / 2 - 6, armY, 7, 18, [4, 4, 0, 0]);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.roundRect(cx + bodyW / 2 - 1, armY, 7, 18, [4, 4, 0, 0]);
+        ctx.fill();
+
+        // 手
+        ctx.fillStyle = '#e8b890';
+        ctx.beginPath();
+        ctx.arc(cx - bodyW / 2 - 3, armY + 19, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + bodyW / 2 + 2, armY + 19, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // ===== 头部 =====
+        const headCY = bodyTop - 12;
+        const headR = 11;
+
+        // 脖子
+        ctx.fillStyle = '#e8b890';
+        ctx.fillRect(cx - 4, bodyTop - 5, 8, 7);
+
+        // ===== 满头白发：先画整头白发 =====
+        // 主发团（覆盖整个头顶）
+        ctx.fillStyle = '#f0f0f0';
+        ctx.beginPath();
+        ctx.arc(cx, headCY - headR * 0.15, headR * 1.12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 左右两侧发团（向外鼓）
+        ctx.beginPath();
+        ctx.arc(cx - headR * 0.82, headCY - headR * 0.05, headR * 0.58, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + headR * 0.82, headCY - headR * 0.05, headR * 0.58, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 后脑发团（覆盖后脑勺）
+        ctx.beginPath();
+        ctx.arc(cx, headCY + headR * 0.15, headR * 0.88, 0, Math.PI * 2);
+        ctx.fill();
+
+        // ===== 脸部肤色：覆盖白发，露出脸 =====
+        ctx.fillStyle = '#e8b890';
+        // 脸部主体（从额头发际线到下巴）
+        ctx.beginPath();
+        ctx.ellipse(cx, headCY + headR * 0.22, headR * 0.72, headR * 0.68, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 额头（发际线下方，少量露出）
+        ctx.beginPath();
+        ctx.ellipse(cx, headCY - headR * 0.18, headR * 0.6, headR * 0.28, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // ===== 发丝纹理 =====
+        ctx.strokeStyle = '#d8d8d8';
+        ctx.lineWidth = 0.7;
+        ctx.lineCap = 'round';
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath();
+          ctx.moveTo(cx + i * headR * 0.28, headCY - headR * 0.85);
+          ctx.quadraticCurveTo(
+            cx + i * headR * 0.35, headCY - headR * 0.55,
+            cx + i * headR * 0.42, headCY - headR * 0.3
+          );
+          ctx.stroke();
+        }
+        // 两侧鬓角发丝
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 2; i++) {
+            ctx.beginPath();
+            ctx.moveTo(cx + side * headR * 0.95, headCY - headR * 0.1 + i * 4);
+            ctx.quadraticCurveTo(
+              cx + side * headR * 1.1, headCY + headR * 0.25 + i * 3,
+              cx + side * headR * 0.95, headCY + headR * 0.55 + i * 2
+            );
+            ctx.stroke();
+          }
+        }
+        ctx.lineCap = 'butt';
+
+        // 头发高光
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(cx - headR * 0.3, headCY - headR * 0.65, headR * 0.5, headR * 0.16, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(cx + headR * 0.55, headCY - headR * 0.2, headR * 0.15, headR * 0.35, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 白眉毛
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx - 8, headCY - 3.5);
+        ctx.lineTo(cx - 2, headCY - 4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + 8, headCY - 3.5);
+        ctx.lineTo(cx + 2, headCY - 4);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+
+        // 眼睛
+        ctx.fillStyle = '#2a2018';
+        ctx.beginPath();
+        ctx.arc(cx - 4, headCY - 0.5, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + 4, headCY - 0.5, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 鼻子
+        ctx.fillStyle = '#d8a880';
+        ctx.beginPath();
+        ctx.arc(cx, headCY + 2.5, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 白胡子
+        ctx.fillStyle = '#f0f0f0';
+        ctx.beginPath();
+        ctx.ellipse(cx, headCY + 8, 9.5, 6.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 胡子纹理
+        ctx.strokeStyle = '#d8d8d8';
+        ctx.lineWidth = 0.8;
+        for (let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(cx + i * 3.5, headCY + 4.5);
+          ctx.lineTo(cx + i * 3.5, headCY + 12.5);
+          ctx.stroke();
+        }
+
+        // 胡子高光
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(cx - 2, headCY + 5.5, 4, 2, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+      },
+
+      drawItems(ctx) {
+        this.items.forEach(item => {
+          if (!item.active) return;
+          this.drawShape(ctx, item.x, item.y, item.radius, item.shape, item.color);
+        });
+
+        this.sparkles.forEach(sp => {
+          const px = sp.baseX + Math.sin(sp.phase * 0.7) * sp.r * 0.4;
+          const py = sp.baseY + Math.cos(sp.phase * 0.5) * sp.r * 0.4;
+          const alpha = 0.3 + 0.5 * (Math.sin(sp.phase) * 0.5 + 0.5);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = '#ffffff';
+          const s = sp.size * (0.6 + 0.4 * Math.sin(sp.phase * 1.5));
+          ctx.beginPath();
+          ctx.moveTo(px, py - s);
+          ctx.lineTo(px + s * 0.3, py - s * 0.3);
+          ctx.lineTo(px + s, py);
+          ctx.lineTo(px + s * 0.3, py + s * 0.3);
+          ctx.lineTo(px, py + s);
+          ctx.lineTo(px - s * 0.3, py + s * 0.3);
+          ctx.lineTo(px - s, py);
+          ctx.lineTo(px - s * 0.3, py - s * 0.3);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        });
+      },
+
+      drawShape(ctx, x, y, r, shape, color) {
+        switch (shape) {
+          case 'goldbar': this.drawGoldBar(ctx, x, y, r); break;
+          case 'coin':    this.drawCoin(ctx, x, y, r); break;
+          case 'diamond': this.drawDiamond(ctx, x, y, r); break;
+          case 'rock':    this.drawRock(ctx, x, y, r); break;
+          case 'bag':     this.drawBag(ctx, x, y, r); break;
+          case 'tnt':     this.drawTNT(ctx, x, y, r); break;
+        }
+      },
+
+      drawGoldBar(ctx, x, y, r) {
+        const w = r * 0.88;
+        const h = r * 0.5;
+
+        ctx.fillStyle = 'rgba(160,120,32,0.5)';
+        ctx.beginPath();
+        ctx.roundRect(x - w, y - h + 4, w * 2, h * 2, r * 0.18);
+        ctx.fill();
+
+        const grad = ctx.createLinearGradient(x - w, y - h, x + w, y + h);
+        grad.addColorStop(0, '#fff8c0');
+        grad.addColorStop(0.3, '#f8d050');
+        grad.addColorStop(0.7, '#e8b030');
+        grad.addColorStop(1, '#b88020');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(x - w, y - h, w * 2, h * 2, r * 0.18);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.beginPath();
+        ctx.roundRect(x - w * 0.85, y - h * 0.85, w * 1.7, h * 0.55, r * 0.12);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(160,120,32,0.45)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x - w * 0.55, y - h * 0.25, w * 1.1, h * 0.5, r * 0.08);
+        ctx.stroke();
+
+        ctx.shadowColor = 'rgba(255,200,80,0.4)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.roundRect(x - w, y - h, w * 2, h * 2, r * 0.18);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      },
+
+      drawCoin(ctx, x, y, r) {
+        ctx.fillStyle = '#a07820';
+        ctx.beginPath();
+        ctx.arc(x, y + 1.5, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        const grad = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+        grad.addColorStop(0, '#fff8c0');
+        grad.addColorStop(0.4, '#f8d050');
+        grad.addColorStop(1, '#d09020');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(160,120,32,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.78, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.beginPath();
+        ctx.ellipse(x - r * 0.3, y - r * 0.35, r * 0.35, r * 0.18, -0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#b08020';
+        ctx.font = `bold ${Math.floor(r * 1.1)}px Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$', x, y + r * 0.08);
+      },
+
+      drawDiamond(ctx, x, y, r) {
+        const topY = y - r * 0.75;
+        const midY = y - r * 0.15;
+        const botY = y + r * 0.95;
+        const w = r * 0.85;
+        const topW = r * 0.5;
+
+        ctx.fillStyle = '#b8ecff';
+        ctx.beginPath();
+        ctx.moveTo(x - w, midY);
+        ctx.lineTo(x - topW, topY);
+        ctx.lineTo(x, topY);
+        ctx.lineTo(x, botY);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#48a0d8';
+        ctx.beginPath();
+        ctx.moveTo(x + w, midY);
+        ctx.lineTo(x + topW, topY);
+        ctx.lineTo(x, topY);
+        ctx.lineTo(x, botY);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#e8f8ff';
+        ctx.beginPath();
+        ctx.moveTo(x - topW, topY);
+        ctx.lineTo(x - w, midY);
+        ctx.lineTo(x + w, midY);
+        ctx.lineTo(x + topW, topY);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.beginPath();
+        ctx.moveTo(x - topW * 0.45, topY + 1.5);
+        ctx.lineTo(x - topW * 0.15, midY - 2);
+        ctx.lineTo(x + topW * 0.15, topY + 1.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x - w, midY);
+        ctx.lineTo(x - topW, topY);
+        ctx.lineTo(x + topW, topY);
+        ctx.lineTo(x + w, midY);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.shadowColor = 'rgba(136,221,255,0.5)';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.moveTo(x - w, midY);
+        ctx.lineTo(x, botY);
+        ctx.lineTo(x + w, midY);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      },
+
+      drawRock(ctx, x, y, r) {
+        const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.2, x, y, r);
+        grad.addColorStop(0, '#9a9aaa');
+        grad.addColorStop(1, '#4a4a5a');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(40,40,50,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x - r * 0.4, y - r * 0.2);
+        ctx.lineTo(x + r * 0.1, y + r * 0.3);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + r * 0.2, y - r * 0.4);
+        ctx.lineTo(x + r * 0.5, y + r * 0.1);
+        ctx.stroke();
+      },
+
+      drawBag(ctx, x, y, r) {
+        const grad = ctx.createLinearGradient(x, y - r, x, y + r);
+        grad.addColorStop(0, '#c09870');
+        grad.addColorStop(1, '#7a5a38');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 0.85, r, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#5a4028';
+        ctx.beginPath();
+        ctx.ellipse(x, y - r * 0.7, r * 0.5, r * 0.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#3a2818';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - r * 0.5, y - r * 0.6);
+        ctx.lineTo(x + r * 0.5, y - r * 0.6);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffd966';
+        ctx.beginPath();
+        ctx.arc(x, y + r * 0.1, r * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#a07830';
+        ctx.font = `bold ${Math.floor(r * 0.5)}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$', x, y + r * 0.15);
+      },
+
+      drawTNT(ctx, x, y, r) {
+        const grad = ctx.createLinearGradient(x - r, y - r, x + r, y + r);
+        grad.addColorStop(0, '#ff8a6a');
+        grad.addColorStop(1, '#cc4a2a');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6, r * 0.2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#5a3a1a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y - r * 0.8);
+        ctx.quadraticCurveTo(x + r * 0.6, y - r * 1.4, x + r * 0.2, y - r * 1.8);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffdd44';
+        ctx.beginPath();
+        ctx.arc(x + r * 0.2, y - r * 1.8, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.floor(r * 0.55)}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TNT', x, y + r * 0.1);
+      },
+
+      drawHook(ctx) {
+        const endX = HOOK_ORIGIN_X + Math.sin(this.angle) * this.shootLength;
+        const endY = HOOK_ORIGIN_Y + Math.cos(this.angle) * this.shootLength;
+
+        this.hookTrail.forEach((t, i) => {
+          const alpha = t.life * 0.15 * (i / this.hookTrail.length);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = '#ffd966';
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, HOOK_RADIUS * 0.5 * t.life, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = 'rgba(200, 180, 140, 0.75)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(HOOK_ORIGIN_X, HOOK_ORIGIN_Y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255, 240, 200, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(HOOK_ORIGIN_X - 0.5, HOOK_ORIGIN_Y);
+        ctx.lineTo(endX - 0.5, endY);
+        ctx.stroke();
+
+        ctx.fillStyle = '#8a6a30';
+        ctx.beginPath();
+        ctx.arc(endX, endY, HOOK_RADIUS * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f0c040';
+        ctx.beginPath();
+        ctx.arc(endX, endY, HOOK_RADIUS * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+
+        const ringGrad = ctx.createRadialGradient(
+          endX - HOOK_RADIUS * 0.15, endY - HOOK_RADIUS * 0.15, 1,
+          endX, endY, HOOK_RADIUS * 0.7
+        );
+        ringGrad.addColorStop(0, '#fff2b0');
+        ringGrad.addColorStop(0.5, '#e8b030');
+        ringGrad.addColorStop(1, '#8a6a20');
+        ctx.fillStyle = ringGrad;
+        ctx.beginPath();
+        ctx.arc(endX, endY, HOOK_RADIUS * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(endX - HOOK_RADIUS * 0.2, endY - HOOK_RADIUS * 0.2, HOOK_RADIUS * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+
+        const hookLen = HOOK_RADIUS * 1.6;
+        const spread = HOOK_RADIUS * 0.7;
+
+        ctx.strokeStyle = '#f0c040';
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(endX - spread * 0.5, endY + HOOK_RADIUS * 0.2);
+        ctx.quadraticCurveTo(
+          endX - spread * 1.4, endY + HOOK_RADIUS * 0.6,
+          endX - spread * 1.2, endY + hookLen
+        );
+        ctx.quadraticCurveTo(
+          endX - spread * 0.9, endY + hookLen * 0.85,
+          endX - spread * 0.5, endY + hookLen * 0.7
+        );
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255,248,180,0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(endX - spread * 0.55, endY + HOOK_RADIUS * 0.25);
+        ctx.quadraticCurveTo(
+          endX - spread * 1.3, endY + HOOK_RADIUS * 0.6,
+          endX - spread * 1.1, endY + hookLen * 0.95
+        );
+        ctx.stroke();
+
+        ctx.strokeStyle = '#f0c040';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(endX + spread * 0.5, endY + HOOK_RADIUS * 0.2);
+        ctx.quadraticCurveTo(
+          endX + spread * 1.4, endY + HOOK_RADIUS * 0.6,
+          endX + spread * 1.2, endY + hookLen
+        );
+        ctx.quadraticCurveTo(
+          endX + spread * 0.9, endY + hookLen * 0.85,
+          endX + spread * 0.5, endY + hookLen * 0.7
+        );
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255,248,180,0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(endX + spread * 0.55, endY + HOOK_RADIUS * 0.25);
+        ctx.quadraticCurveTo(
+          endX + spread * 1.3, endY + HOOK_RADIUS * 0.6,
+          endX + spread * 1.1, endY + hookLen * 0.95
+        );
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff8c0';
+        ctx.beginPath();
+        ctx.arc(endX - spread * 1.2, endY + hookLen, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(endX + spread * 1.2, endY + hookLen, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowColor = 'rgba(255,217,102,0.6)';
+        ctx.shadowBlur = 16;
+        ctx.strokeStyle = 'rgba(255,217,102,0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(endX, endY, HOOK_RADIUS * 0.8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+
+        if (this.caughtItem) {
+          const item = this.caughtItem;
+          item.x = endX;
+          item.y = endY + hookLen + item.radius * 0.5;
+          this.drawShape(ctx, item.x, item.y, item.radius, item.shape, item.color);
+        }
+
+        if (this.state === HOOK_STATE.SWINGING) {
+          ctx.globalAlpha = 0.2;
+          ctx.strokeStyle = '#ffd966';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(HOOK_ORIGIN_X, HOOK_ORIGIN_Y);
+          ctx.lineTo(HOOK_ORIGIN_X + Math.sin(-MAX_ANGLE) * 90, HOOK_ORIGIN_Y + Math.cos(-MAX_ANGLE) * 90);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(HOOK_ORIGIN_X, HOOK_ORIGIN_Y);
+          ctx.lineTo(HOOK_ORIGIN_X + Math.sin(MAX_ANGLE) * 90, HOOK_ORIGIN_Y + Math.cos(MAX_ANGLE) * 90);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      },
+
+      drawParticles(ctx) {
+        this.particles.forEach(p => {
+          ctx.globalAlpha = p.life * 0.8;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+      },
+
+      drawFloatTexts(ctx) {
+        this.floatTexts.forEach(ft => {
+          ctx.globalAlpha = Math.min(1, ft.life);
+          ctx.fillStyle = ft.color;
+          ctx.font = 'bold 20px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = ft.color;
+          ctx.shadowBlur = 12;
+          ctx.fillText(ft.text, ft.x, ft.y);
+          ctx.shadowBlur = 0;
+        });
+        ctx.globalAlpha = 1;
+      },
+
+      drawOverlay(ctx) {
+        if (this.gameOver) {
+          this.drawOverlayPanel(ctx, '时间到', `得分 ${this.score}`, '点击画布重试');
+        } else if (this.win && this.transitioning) {
+          this.drawOverlayPanel(ctx, `第 ${this.levelIndex + 1} 关通过`, `得分 ${this.score}`, '即将进入下一关...');
+        } else if (this.allComplete) {
+          this.drawOverlayPanel(ctx, '全部通关', `总分 ${this.score}`, '点击画布重新开始');
+        }
+      },
+
+      drawOverlayPanel(ctx, title, subtitle, hint) {
+        ctx.fillStyle = 'rgba(5, 8, 18, 0.8)';
+        ctx.fillRect(0, 0, LOGIC_W, LOGIC_H);
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#ffd966';
+        ctx.fillStyle = '#f0e8d0';
+        ctx.font = 'bold 34px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(title, LOGIC_W / 2, LOGIC_H / 2 - 30);
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#f0a030';
+        ctx.fillStyle = '#ffd966';
+        ctx.font = '600 20px Inter, system-ui, sans-serif';
+        ctx.fillText(subtitle, LOGIC_W / 2, LOGIC_H / 2 + 25);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#8a8a9a';
+        ctx.font = '14px Inter, system-ui, sans-serif';
+        ctx.fillText(hint, LOGIC_W / 2, LOGIC_H / 2 + 80);
+      },
+
+      handleCanvasClick() {
+        if (this.gameOver) this.loadLevel(this.levelIndex);
+        else if (this.allComplete) this.loadLevel(0);
+      }
+    };
+
+    const levelDisplay = document.getElementById('levelDisplay');
+    const targetDisplay = document.getElementById('targetDisplay');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const timeDisplay = document.getElementById('timeDisplay');
+
+    function updateHUD() {
+      if (!game.config) return;
+      levelDisplay.textContent = `第 ${game.levelIndex + 1} / ${LEVELS.length} 关`;
+      targetDisplay.textContent = `目标 ${game.config.target}`;
+      scoreDisplay.textContent = `${game.score}`;
+      timeDisplay.textContent = `${Math.ceil(game.timeLeft)}s`;
+      const canBomb = game.state === HOOK_STATE.RETRACTING && game.caughtItem && game.bombCount > 0;
+      btnBomb.disabled = !canBomb;
+      btnBomb.textContent = `炸药 (${game.bombCount})`;
+    }
+
+    canvas.addEventListener('click', () => {
+      if (game.gameOver || game.allComplete) game.handleCanvasClick();
+    });
+
+    let lastTime = performance.now();
+    let accumulator = 0;
+
+    game.loadLevel(0);
+
+    function gameLoop(currentTime) {
+      let delta = currentTime - lastTime;
+      lastTime = currentTime;
+      delta = Math.min(delta, MAX_FRAME_TIME);
+      accumulator += delta;
+      while (accumulator >= FIXED_STEP) {
+        game.update(FIXED_STEP);
+        accumulator -= FIXED_STEP;
+      }
+      game.render(ctx);
+      requestAnimationFrame(gameLoop);
+    }
+    requestAnimationFrame(gameLoop);
+
+    setTimeout(() => updateHUD(), 0);
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+  })();
+</script>
+</body>
+</html>
