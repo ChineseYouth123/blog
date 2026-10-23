@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>💣 全息扫雷 · 霓虹</title>
+  <style>
+    /* ================= 基础重置 & 现代字体 ================= */
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+    
+    /* 主题变量：默认黑夜模式 */
+    :root {
+      --bg-color: #0b0f19;
+      --bg-gradient-1: rgba(0, 240, 255, 0.08);
+      --bg-gradient-2: rgba(255, 0, 128, 0.08);
+      --container-bg: rgba(20, 25, 40, 0.65);
+      --header-bg: rgba(10, 15, 25, 0.6);
+      --text-primary: #ffffff;
+      --text-secondary: #5c6c80;
+      --cell-hidden: #182233;
+      --cell-hidden-border: #2a3a55;
+      --cell-revealed: #0d1420;
+      --cell-hover: rgba(0, 240, 255, 0.15);
+      --mine-color: #00aaff;       /* 地雷蓝色 */
+      --flag-color: #ff3366;       /* 旗子红色 */
+      --num-1: #ff3333;            /* 数字1红色 */
+      --num-2: #00ff88;
+      --num-3: #ff3366;
+      --num-4: #b900ff;
+      --num-5: #ffcc00;
+      --num-6: #00e5ff;
+      --num-7: #ffffff;
+      --num-8: #ff8800;
+      --counter-primary: #00f0ff;
+      --counter-secondary: #ff007f;
+      --btn-gradient-start: #00f0ff;
+      --btn-gradient-end: #0077ff;
+      --overlay-bg: rgba(10, 15, 25, 0.85);
+      --card-bg: rgba(30, 40, 60, 0.9);
+      --shadow-color: rgba(0, 0, 0, 0.6);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --inset-shadow: rgba(0, 0, 0, 0.5);
+      --tips-color: #5c6c80;
+      --tips-span-bg: rgba(255, 255, 255, 0.05);
+      --tips-span-color: #8899a6;
+      --canvas-bg: rgba(0, 0, 0, 0.3);
+      --canvas-inset: rgba(0, 0, 0, 0.8);
+    }
+
+    /* 白天模式 */
+    body.light {
+      --bg-color: #e8ecf1;
+      --bg-gradient-1: rgba(0, 180, 255, 0.06);
+      --bg-gradient-2: rgba(255, 100, 150, 0.06);
+      --container-bg: rgba(255, 255, 255, 0.6);
+      --header-bg: rgba(240, 245, 250, 0.8);
+      --text-primary: #1a2332;
+      --text-secondary: #5a6a7a;
+      --cell-hidden: #d0d9e4;
+      --cell-hidden-border: #b0bdd0;
+      --cell-revealed: #eef2f7;
+      --cell-hover: rgba(0, 150, 255, 0.15);
+      --mine-color: #0077cc;       /* 白天模式地雷蓝色 */
+      --flag-color: #cc2244;       /* 白天模式旗子红色深一些 */
+      --num-1: #cc0000;            /* 白天模式数字1红色深一些 */
+      --num-2: #009944;
+      --num-3: #cc2244;
+      --num-4: #8800cc;
+      --num-5: #cc8800;
+      --num-6: #0099bb;
+      --num-7: #333333;
+      --num-8: #cc6600;
+      --counter-primary: #0077cc;
+      --counter-secondary: #cc0066;
+      --btn-gradient-start: #0088cc;
+      --btn-gradient-end: #0055aa;
+      --overlay-bg: rgba(240, 245, 250, 0.9);
+      --card-bg: rgba(255, 255, 255, 0.95);
+      --shadow-color: rgba(0, 0, 0, 0.15);
+      --glass-border: rgba(0, 0, 0, 0.08);
+      --inset-shadow: rgba(0, 0, 0, 0.08);
+      --tips-color: #5a6a7a;
+      --tips-span-bg: rgba(0, 0, 0, 0.05);
+      --tips-span-color: #4a5a6a;
+      --canvas-bg: rgba(220, 228, 236, 0.5);
+      --canvas-inset: rgba(0, 0, 0, 0.06);
+    }
+
+    body {
+      background-color: var(--bg-color);
+      background-image: 
+        radial-gradient(circle at 15% 50%, var(--bg-gradient-1), transparent 25%),
+        radial-gradient(circle at 85% 30%, var(--bg-gradient-2), transparent 25%);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      color: var(--text-primary);
+      touch-action: none;
+      overflow: hidden;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* ================= 玻璃拟态主容器 ================= */
+    #game-container {
+      background: var(--container-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 
+        0 30px 60px var(--shadow-color),
+        inset 0 1px 0 var(--glass-border),
+        0 0 40px var(--bg-gradient-1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      transition: transform 0.1s ease, background 0.3s, box-shadow 0.3s;
+    }
+
+    /* ================= 顶栏仪表盘 ================= */
+    .header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      background: var(--header-bg);
+      padding: 12px 20px;
+      border-radius: 16px;
+      border: 1px solid var(--glass-border);
+      box-shadow: inset 0 2px 10px var(--inset-shadow);
+      transition: background 0.3s;
+    }
+
+    .counter {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--counter-primary);
+      text-shadow: 0 0 10px var(--counter-primary);
+      letter-spacing: 2px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+    }
+
+    #timer { color: var(--counter-secondary); text-shadow: 0 0 10px var(--counter-secondary); }
+
+    .counter.flash { color: #ff3333; text-shadow: 0 0 20px #ff3333; animation: shake 0.3s; }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+
+    /* 重启按钮 & 主题切换 */
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #restart-btn, #theme-btn {
+      font-size: 32px;
+      background: var(--tips-span-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 50%;
+      width: 56px;
+      height: 56px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s;
+      box-shadow: 0 4px 15px var(--shadow-color);
+      color: var(--text-primary);
+    }
+
+    #restart-btn:hover, #theme-btn:hover {
+      background: var(--cell-hover);
+      transform: scale(1.05) rotate(15deg);
+      box-shadow: 0 0 20px var(--bg-gradient-1);
+      border-color: var(--counter-primary);
+    }
+
+    #restart-btn:active, #theme-btn:active { transform: scale(0.95) rotate(-15deg); }
+
+    /* ================= 画布区域 ================= */
+    canvas {
+      border-radius: 12px;
+      background: var(--canvas-bg);
+      box-shadow: 
+        inset 0 0 20px var(--canvas-inset),
+        0 0 0 1px var(--glass-border);
+      cursor: pointer;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    /* ================= 底部提示 ================= */
+    .tips {
+      margin-top: 20px;
+      color: var(--tips-color);
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.8;
+      letter-spacing: 0.5px;
+    }
+    .tips span {
+      display: inline-block;
+      background: var(--tips-span-bg);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin: 0 4px;
+      color: var(--tips-span-color);
+    }
+
+    /* ================= 结算面板 ================= */
+    #overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--overlay-bg);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 24px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      z-index: 100;
+    }
+    #overlay.show { opacity: 1; pointer-events: auto; }
+
+    .result-card {
+      background: var(--card-bg);
+      border: 1px solid var(--glass-border);
+      padding: 40px 50px;
+      border-radius: 20px;
+      text-align: center;
+      box-shadow: 0 20px 50px var(--shadow-color), inset 0 1px 0 var(--glass-border);
+      transform: scale(0.8) translateY(20px);
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.3s;
+    }
+    #overlay.show .result-card { transform: scale(1) translateY(0); }
+    
+    .result-card h2 { 
+      font-size: 36px; 
+      margin-bottom: 12px; 
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+    .result-card.win h2 { color: #00cc66; text-shadow: 0 0 20px rgba(0, 204, 102, 0.5); }
+    .result-card.lose h2 { color: #ff3366; text-shadow: 0 0 20px rgba(255, 51, 102, 0.5); }
+
+    .result-card p { font-size: 16px; color: var(--text-secondary); margin-bottom: 30px; }
+    
+    .result-card button {
+      background: linear-gradient(135deg, var(--btn-gradient-start), var(--btn-gradient-end));
+      color: #fff;
+      border: none;
+      padding: 12px 40px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 10px 20px rgba(0, 100, 200, 0.3);
+      transition: all 0.2s;
+      letter-spacing: 1px;
+    }
+    .result-card button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 25px rgba(0, 100, 200, 0.5);
+      filter: brightness(1.15);
+    }
+    .result-card button:active { transform: translateY(1px); }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <div class="header">
+    <div class="counter" id="mine-count">010</div>
+    <div class="btn-group">
+      <button id="theme-btn" title="切换主题">🌙</button>
+      <button id="restart-btn">💡</button>
+    </div>
+    <div class="counter" id="timer">000</div>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+  
+  <div id="overlay">
+    <div class="result-card" id="res-card">
+      <h2 id="res-title">游戏结束</h2>
+      <p id="res-desc">你踩到地雷了！</p>
+      <button id="btn-retry">重新开始</button>
+    </div>
+  </div>
+</div>
+<div class="tips">
+  <span>左键翻开</span> <span>右键插旗</span> <span>双击快开</span><br>
+  移动端：点击翻开 / 长按插旗 / 双指快开
+</div>
+
+<script>
+  // ==========================================
+  //  1. 赛博音效引擎 (Web Audio API) - 增强版
+  // ==========================================
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playTone(freq, type, duration, vol = 0.1, slideTo = null) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) {
+      osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + duration);
+    }
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  const Sound = {
+    click: () => playTone(900, 'sine', 0.06, 0.04, 1200),
+    flag: () => { 
+      playTone(1200, 'triangle', 0.08, 0.06); 
+      setTimeout(()=>playTone(1600, 'triangle', 0.1, 0.04), 40); 
+    },
+    unflag: () => playTone(600, 'triangle', 0.12, 0.04, 400),
+    chord: () => { 
+      playTone(500, 'square', 0.08, 0.04);
+      setTimeout(()=>playTone(700, 'square', 0.06, 0.03), 30);
+    },
+    win: () => {
+      const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+      notes.forEach((n, i) => setTimeout(() => playTone(n, 'sine', 0.5, 0.08), i * 120));
+    },
+    explosion: () => {
+      if (!audioCtx) return;
+      const bufferSize = audioCtx.sampleRate * 0.8;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2000, audioCtx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.7);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start();
+      
+      playTone(80, 'sine', 0.6, 0.3, 30);
+    }
+  };
+
+  // ==========================================
+  //  2. 游戏配置与状态
+  // ==========================================
+  const CONFIG = {
+    ROWS: 9, COLS: 9, MINES: 10, CELL_SIZE: 44,
+  };
+
+  // 动态颜色从CSS变量获取
+  function getCSSVar(name) {
+    return getComputedStyle(document.body).getPropertyValue(name).trim();
+  }
+
+  const COLORS = {
+    get hidden() { return getCSSVar('--cell-hidden'); },
+    get hiddenBorder() { return getCSSVar('--cell-hidden-border'); },
+    get revealed() { return getCSSVar('--cell-revealed'); },
+    get hover() { return getCSSVar('--cell-hover'); },
+    get mine() { return getCSSVar('--mine-color'); },
+    get flag() { return getCSSVar('--flag-color'); },
+    get num() { 
+      return [
+        '', 
+        getCSSVar('--num-1'),
+        getCSSVar('--num-2'),
+        getCSSVar('--num-3'),
+        getCSSVar('--num-4'),
+        getCSSVar('--num-5'),
+        getCSSVar('--num-6'),
+        getCSSVar('--num-7'),
+        getCSSVar('--num-8')
+      ];
+    }
+  };
+
+  let board = [];
+  let status = '未开始';
+  let revealedCount = 0;
+  let flaggedCount = 0;
+  let firstClick = true;
+  let timer = 0;
+  let timerInterval = null;
+  let flashTimer = null;
+  
+  let shakeTime = 0;
+  let redFlash = 0;
+  let particles = [];
+  let hoverR = -1, hoverC = -1;
+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const mineCountEl = document.getElementById('mine-count');
+  const timerEl = document.getElementById('timer');
+  const restartBtn = document.getElementById('restart-btn');
+  const themeBtn = document.getElementById('theme-btn');
+  const overlay = document.getElementById('overlay');
+  const resCard = document.getElementById('res-card');
+  const resTitle = document.getElementById('res-title');
+  const resDesc = document.getElementById('res-desc');
+  const btnRetry = document.getElementById('btn-retry');
+
+  canvas.width = CONFIG.COLS * CONFIG.CELL_SIZE;
+  canvas.height = CONFIG.ROWS * CONFIG.CELL_SIZE;
+
+  // 主题切换
+  function toggleTheme() {
+    document.body.classList.toggle('light');
+    const isLight = document.body.classList.contains('light');
+    themeBtn.textContent = isLight ? '☀️' : '🌙';
+    drawBoard();
+  }
+  themeBtn.addEventListener('click', toggleTheme);
+
+  // ==========================================
+  //  3. 初始化
+  // ==========================================
+  function initGame() {
+    board = [];
+    status = '未开始';
+    revealedCount = 0;
+    flaggedCount = 0;
+    firstClick = true;
+    timer = 0;
+    shakeTime = 0; redFlash = 0; particles = [];
+    hoverR = -1; hoverC = -1;
+    hitR = -1; hitC = -1;
+    
+    if (timerInterval) clearInterval(timerInterval);
+    if (flashTimer) clearTimeout(flashTimer);
+    
+    timerEl.textContent = '000';
+    restartBtn.textContent = '💡';
+    overlay.classList.remove('show');
+    
+    for (let r = 0; r < CONFIG.ROWS; r++) {
+      let row = [];
+      for (let c = 0; c < CONFIG.COLS; c++) {
+        row.push({ r, c, isMine: false, isRevealed: false, isFlagged: false, adjacentMines: 0 });
+      }
+      board.push(row);
+    }
+    updateMineCount();
+    drawBoard();
+  }
+
+  // ==========================================
+  //  4. 布雷
+  // ==========================================
+  function placeMines(safeR, safeC) {
+    let minesPlaced = 0;
+    while (minesPlaced < CONFIG.MINES) {
+      const r = Math.floor(Math.random() * CONFIG.ROWS);
+      const c = Math.floor(Math.random() * CONFIG.COLS);
+      if (Math.abs(r - safeR) <= 1 && Math.abs(c - safeC) <= 1) continue;
+      if (!board[r][c].isMine) {
+        board[r][c].isMine = true;
+        minesPlaced++;
+      }
+    }
+    for (let r = 0; r < CONFIG.ROWS; r++) {
+      for (let c = 0; c < CONFIG.COLS; c++) {
+        if (!board[r][c].isMine) {
+          let count = 0;
+          for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+              const nr = r + i, nc = c + j;
+              if (nr >= 0 && nr < CONFIG.ROWS && nc >= 0 && nc < CONFIG.COLS) {
+                if (board[nr][nc].isMine) count++;
+              }
+            }
+          }
+          board[r][c].adjacentMines = count;
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  //  5. 玩法逻辑（含震动反馈增强）
+  // ==========================================
+  function reveal(r, c) {
+    if (status === '胜利' || status === '失败') return;
+    const cell = board[r][c];
+    if (cell.isRevealed || cell.isFlagged) return;
+
+    // 翻开前震动
+    if (navigator.vibrate) navigator.vibrate(15);
+
+    if (firstClick) {
+      firstClick = false;
+      placeMines(r, c);
+      status = '进行中';
+      startTimer();
+    }
+
+    if (cell.isMine) {
+      cell.isRevealed = true;
+      gameOver(cell);
+      return;
+    }
+
+    // BFS 展开
+    const queue = [{ r, c }];
+    while (queue.length > 0) {
+      const { r: cr, c: cc } = queue.shift();
+      const cur = board[cr][cc];
+      if (cur.isRevealed || cur.isFlagged || cur.isMine) continue;
+      
+      cur.isRevealed = true;
+      revealedCount++;
+
+      if (cur.adjacentMines === 0) {
+        for (let i = -1; i <= 1; i++) {
+          for (let j = -1; j <= 1; j++) {
+            const nr = cr + i, nc = cc + j;
+            if (nr >= 0 && nr < CONFIG.ROWS && nc >= 0 && nc < CONFIG.COLS) {
+              const nb = board[nr][nc];
+              if (!nb.isRevealed && !nb.isFlagged && !nb.isMine) queue.push({ r: nr, c: nc });
+            }
+          }
+        }
+      }
+    }
+    if (status === '进行中') Sound.click();
+    checkWin();
+    drawBoard();
+  }
+
+  function toggleFlag(r, c) {
+    if (status !== '进行中') return;
+    const cell = board[r][c];
+    if (cell.isRevealed) return;
+
+    if (cell.isFlagged) {
+      cell.isFlagged = false;
+      flaggedCount--;
+      Sound.unflag();
+      if (navigator.vibrate) navigator.vibrate(20);
+    } else {
+      if (flaggedCount >= CONFIG.MINES) {
+        mineCountEl.classList.add('flash');
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => mineCountEl.classList.remove('flash'), 300);
+        // 旗子用尽震动
+        if (navigator.vibrate) navigator.vibrate([30, 30, 30]);
+        return;
+      }
+      cell.isFlagged = true;
+      flaggedCount++;
+      Sound.flag();
+      // 插旗震动更明显
+      if (navigator.vibrate) navigator.vibrate([30, 20, 30]);
+    }
+    updateMineCount();
+    drawBoard();
+  }
+
+  function chord(r, c) {
+    if (status !== '进行中') return;
+    const cell = board[r][c];
+    if (!cell.isRevealed || cell.adjacentMines === 0) return;
+
+    let flags = 0;
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const nr = r + i, nc = c + j;
+        if (nr >= 0 && nr < CONFIG.ROWS && nc >= 0 && nc < CONFIG.COLS && board[nr][nc].isFlagged) flags++;
+      }
+    }
+    if (flags !== cell.adjacentMines) return;
+
+    Sound.chord();
+    if (navigator.vibrate) navigator.vibrate([15, 15, 15]);
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const nr = r + i, nc = c + j;
+        if (nr >= 0 && nr < CONFIG.ROWS && nc >= 0 && nc < CONFIG.COLS) {
+          const nb = board[nr][nc];
+          if (!nb.isFlagged && !nb.isRevealed) reveal(nr, nc);
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  //  6. 胜负结算（含震动）
+  // ==========================================
+  function checkWin() {
+    if (revealedCount === CONFIG.ROWS * CONFIG.COLS - CONFIG.MINES) {
+      status = '胜利';
+      restartBtn.textContent = '🚀';
+      if (timerInterval) clearInterval(timerInterval);
+      
+      for (let r = 0; r < CONFIG.ROWS; r++) {
+        for (let c = 0; c < CONFIG.COLS; c++) {
+          if (board[r][c].isMine) board[r][c].isFlagged = true;
+        }
+      }
+      updateMineCount();
+      drawBoard();
+      Sound.win();
+      // 胜利震动：三短一长
+      if (navigator.vibrate) navigator.vibrate([50, 30, 50, 30, 50, 100]);
+      setTimeout(() => showResult(true), 500);
+    }
+  }
+
+  function gameOver(hitCell) {
+    status = '失败';
+    restartBtn.textContent = '💥';
+    if (timerInterval) clearInterval(timerInterval);
+    
+    shakeTime = 30; 
+    redFlash = 1.0;
+    Sound.explosion();
+    // 失败震动：强烈
+    if (navigator.vibrate) navigator.vibrate([150, 80, 150, 80, 200]);
+
+    for (let r = 0; r < CONFIG.ROWS; r++) {
+      for (let c = 0; c < CONFIG.COLS; c++) {
+        if (board[r][c].isMine) board[r][c].isRevealed = true;
+      }
+    }
+
+    // 全息爆炸粒子
+    const px = hitCell.c * CONFIG.CELL_SIZE + CONFIG.CELL_SIZE / 2;
+    const py = hitCell.r * CONFIG.CELL_SIZE + CONFIG.CELL_SIZE / 2;
+    for (let i = 0; i < 80; i++) {
+      particles.push({
+        x: px, y: py,
+        vx: (Math.random() - 0.5) * 22,
+        vy: (Math.random() - 0.5) * 22,
+        life: 1.0, size: Math.random() * 5 + 2,
+        color: Math.random() > 0.5 ? COLORS.mine : COLORS.flag
+      });
+    }
+
+    drawBoard();
+    setTimeout(() => { if (status === '失败') showResult(false); }, 1200);
+  }
+
+  function showResult(isWin) {
+    resCard.className = 'result-card ' + (isWin ? 'win' : 'lose');
+    resTitle.textContent = isWin ? '系统清除' : '系统崩溃';
+    resDesc.textContent = isWin ? `用时 ${timer} 秒，全息矩阵已破解。` : '触发了全息地雷，神经链接中断。';
+    overlay.classList.add('show');
+  }
+
+  function updateMineCount() {
+    const remain = CONFIG.MINES - flaggedCount;
+    mineCountEl.textContent = remain.toString().padStart(3, '0');
+  }
+
+  function startTimer() {
+    timerInterval = setInterval(() => {
+      timer++;
+      timerEl.textContent = timer.toString().padStart(3, '0');
+    }, 1000);
+  }
+
+  // ==========================================
+  //  7. 现代画风渲染 (Canvas)
+  // ==========================================
+  function drawBoard() {
+    let offsetX = 0, offsetY = 0;
+    if (shakeTime > 0) {
+      offsetX = (Math.random() - 0.5) * 12;
+      offsetY = (Math.random() - 0.5) * 12;
+      shakeTime--;
+    }
+
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(offsetX, offsetY);
+
+    for (let r = 0; r < CONFIG.ROWS; r++) {
+      for (let c = 0; c < CONFIG.COLS; c++) {
+        drawCell(board[r][c], r, c);
+      }
+    }
+
+    // 粒子
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vx *= 0.96; p.vy *= 0.96;
+      p.life -= 0.02;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    if (redFlash > 0) {
+      ctx.fillStyle = `rgba(255, 51, 102, ${redFlash * 0.5})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      redFlash -= 0.02;
+    }
+
+    if (particles.length > 0 || shakeTime > 0 || redFlash > 0) {
+      requestAnimationFrame(drawBoard);
+    }
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawCell(cell, r, c) {
+    const pad = 2;
+    const x = cell.c * CONFIG.CELL_SIZE + pad;
+    const y = cell.r * CONFIG.CELL_SIZE + pad;
+    const size = CONFIG.CELL_SIZE - pad * 2;
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+
+    if (!cell.isRevealed) {
+      ctx.fillStyle = COLORS.hidden;
+      roundRect(ctx, x, y, size, size, 6);
+      ctx.fill();
+      
+      ctx.strokeStyle = COLORS.hiddenBorder;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (hoverR === r && hoverC === c) {
+        ctx.fillStyle = COLORS.hover;
+        roundRect(ctx, x, y, size, size, 6);
+        ctx.fill();
+        ctx.strokeStyle = COLORS.num[1];
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      if (cell.isFlagged) {
+        drawFlag(ctx, cx, cy);
+        if (status === '失败') {
+          if (cell.isMine) {
+            ctx.strokeStyle = COLORS.num[2]; ctx.lineWidth = 2;
+            roundRect(ctx, x + 2, y + 2, size - 4, size - 4, 4);
+            ctx.stroke();
+          } else {
+            drawCross(ctx, cx, cy);
+          }
+        }
+      }
+    } else {
+      ctx.fillStyle = COLORS.revealed;
+      roundRect(ctx, x, y, size, size, 6);
+      ctx.fill();
+      
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      if (cell.isMine) {
+        if (status === '失败' && cell.r === hitR && cell.c === hitC) {
+          ctx.fillStyle = 'rgba(255, 51, 102, 0.2)';
+          roundRect(ctx, x, y, size, size, 6);
+          ctx.fill();
+        }
+        drawMine(ctx, cx, cy);
+      } else if (cell.adjacentMines > 0) {
+        ctx.fillStyle = COLORS.num[cell.adjacentMines];
+        ctx.font = `bold ${size * 0.6}px 'Courier New', monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = COLORS.num[cell.adjacentMines];
+        ctx.shadowBlur = 10;
+        ctx.fillText(cell.adjacentMines, cx, cy + 2);
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  // 绘制地雷（蓝色）
+  function drawMine(ctx, cx, cy) {
+    ctx.shadowColor = COLORS.mine;
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = COLORS.mine;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.strokeStyle = COLORS.mine;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx + 12, cy);
+    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy + 12);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - 2, cy - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 绘制旗子（红色）
+  function drawFlag(ctx, cx, cy) {
+    ctx.shadowColor = COLORS.flag;
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = COLORS.flag;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, cy - 10);
+    ctx.lineTo(cx - 4, cy + 8);
+    ctx.stroke();
+    
+    ctx.fillStyle = COLORS.flag;
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, cy - 10);
+    ctx.lineTo(cx + 8, cy - 5);
+    ctx.lineTo(cx - 4, cy);
+    ctx.fill();
+    
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.strokeStyle = COLORS.flag;
+    ctx.lineWidth = 3;
+    ctx.moveTo(cx - 10, cy + 8);
+    ctx.lineTo(cx + 2, cy + 8);
+    ctx.stroke();
+  }
+
+  function drawCross(ctx, cx, cy) {
+    ctx.strokeStyle = '#ff3366';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, cy - 8); ctx.lineTo(cx + 8, cy + 8);
+    ctx.moveTo(cx + 8, cy - 8); ctx.lineTo(cx - 8, cy + 8);
+    ctx.stroke();
+  }
+
+  // ==========================================
+  //  8. 交互事件
+  // ==========================================
+  let touchTimer = null;
+  let lastTap = 0;
+  let hitR = -1, hitC = -1;
+
+  function getCell(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    let cx = e.clientX, cy = e.clientY;
+    if (e.touches && e.touches.length > 0) {
+      cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+    }
+    const x = (cx - rect.left) * scaleX;
+    const y = (cy - rect.top) * scaleY;
+    const c = Math.floor(x / CONFIG.CELL_SIZE);
+    const r = Math.floor(y / CONFIG.CELL_SIZE);
+    if (r >= 0 && r < CONFIG.ROWS && c >= 0 && c < CONFIG.COLS) return { r, c };
+    return null;
+  }
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  canvas.addEventListener('mousemove', (e) => {
+    const cell = getCell(e);
+    if (cell) {
+      if (hoverR !== cell.r || hoverC !== cell.c) {
+        hoverR = cell.r; hoverC = cell.c;
+        drawBoard();
+      }
+    } else {
+      if (hoverR !== -1) {
+        hoverR = -1; hoverC = -1;
+        drawBoard();
+      }
+    }
+  });
+  canvas.addEventListener('mouseleave', () => { hoverR = -1; hoverC = -1; drawBoard(); });
+
+  canvas.addEventListener('mousedown', (e) => {
+    initAudio();
+    const cell = getCell(e);
+    if (!cell) return;
+    if (e.button === 0) reveal(cell.r, cell.c);
+    else if (e.button === 2) toggleFlag(cell.r, cell.c);
+  });
+
+  canvas.addEventListener('dblclick', (e) => {
+    const cell = getCell(e);
+    if (cell) chord(cell.r, cell.c);
+  });
+
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    initAudio();
+    const cell = getCell(e);
+    if (!cell) return;
+
+    if (e.touches.length >= 2) {
+      if (touchTimer) clearTimeout(touchTimer);
+      chord(cell.r, cell.c);
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      if (touchTimer) clearTimeout(touchTimer);
+      chord(cell.r, cell.c);
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+
+    touchTimer = setTimeout(() => {
+      toggleFlag(cell.r, cell.c);
+      touchTimer = null;
+    }, 400);
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+      const cell = getCell(e.changedTouches[0]);
+      if (cell) reveal(cell.r, cell.c);
+    }
+  }, { passive: false });
+
+  restartBtn.addEventListener('click', () => { initAudio(); initGame(); });
+  btnRetry.addEventListener('click', () => { initAudio(); initGame(); });
+
+  const originalGameOver = gameOver;
+  gameOver = function(hitCell) {
+    hitR = hitCell.r;
+    hitC = hitCell.c;
+    originalGameOver(hitCell);
+  };
+
+  // 启动
+  initGame();
+</script>
+</body>
+</html>

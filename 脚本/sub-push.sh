@@ -27,12 +27,79 @@ do_update() {
     read -p "按回车键返回主菜单..."
 }
 
-# 1. 提交文档
+# 1. 提交文档（支持选择部分文件，不影响未选中的文件）
 do_commit() {
     echo ""
     echo "🔄 提交前自动检查远程更新..."
     git pull --rebase origin main > /dev/null 2>&1 || true
 
+    # ---- 检查是否有变更 ----
+    if [ -z "$(git status --porcelain)" ]; then
+        echo "ℹ️  仓库没有文件变更，无需提交。"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
+
+    # ---- 显示变更列表 ----
+    echo ""
+    echo "📂 当前有变更的文件："
+    echo "------------------------------------------"
+    git status --short
+    echo "------------------------------------------"
+
+    # ---- 让用户选择要提交的文件 ----
+    echo ""
+    echo "请选择要提交的文件："
+    echo "  1) 提交全部变更文件"
+    echo "  2) 手动输入文件路径（支持多个，空格分隔）"
+    echo "  3) 取消提交"
+    read -p "请输入数字 (1-3): " FILE_CHOICE
+
+    case $FILE_CHOICE in
+        1)
+            git add .
+            echo "✅ 已暂存全部变更文件。"
+            ;;
+        2)
+            read -p "请输入要提交的文件路径（多个用空格分隔，例如: docs/a.md docs/b.md）: " FILES
+            if [ -z "$FILES" ]; then
+                echo "❌ 未输入文件路径，已取消。"
+                read -p "按回车键返回主菜单..."
+                return
+            fi
+            # 校验文件是否存在于变更列表中
+            INVALID=""
+            for f in $FILES; do
+                if ! git status --porcelain | grep -q "$f"; then
+                    INVALID="$INVALID $f"
+                fi
+            done
+            if [ -n "$INVALID" ]; then
+                echo "⚠️  以下文件不在变更列表中，将被忽略:$INVALID"
+            fi
+            git add $FILES
+            echo "✅ 已暂存指定的文件。"
+            ;;
+        *)
+            echo "❌ 已取消提交。"
+            read -p "按回车键返回主菜单..."
+            return
+            ;;
+    esac
+
+    # ---- 检查暂存区是否真的有内容 ----
+    if [ -z "$(git diff --cached --name-only)" ]; then
+        echo "ℹ️  暂存区为空，没有文件可提交。"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
+
+    echo ""
+    echo "📋 本次将要提交的文件："
+    git diff --cached --name-only
+    echo ""
+
+    # ---- 选择提交类型 ----
     echo "请选择本次提交的类型："
     PS3="请输入数字 (1-5): "
     select TYPE in "新增内容 (feat)" "修改文档 (docs)" "修复错误 (fix)" "排版美化 (style)" "其他 (chore)"; do
@@ -44,6 +111,7 @@ do_commit() {
         fi
     done
 
+    # ---- 输入修改说明 ----
     while true; do
         read -p "请输入具体的修改说明（不能为空）: " DESC
         [ -n "$DESC" ] && break
@@ -56,19 +124,18 @@ do_commit() {
     read -p "确认要提交并推送吗？(Y/n) " CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && [ -n "$CONFIRM" ]; then
         echo "❌ 已取消。"
+        read -p "按回车键返回主菜单..."
         return
     fi
 
+    # ---- 提交并推送 ----
     echo "🚀 开始执行..."
-    if [ -z "$(git status --porcelain)" ]; then
-        echo "ℹ️  仓库没有文件变更，无需提交。"
-    else
-        git add .
-        git commit -m "$MSG"
-        git push origin main
-        echo "✅ 推送成功！"
-        echo "⚠️  请记得回到主目录执行 ./scripts/push-docs.sh 更新主仓库指针！"
-    fi
+    git commit -m "$MSG"
+    git push origin main
+    echo "✅ 推送成功！"
+    echo "⚠️  请记得回到主目录执行 ./scripts/push-docs.sh 更新主仓库指针！"
+    echo ""
+    echo "ℹ️  未选中的文件仍保留在工作区，状态未变，可下次单独提交。"
     read -p "按回车键返回主菜单..."
 }
 
