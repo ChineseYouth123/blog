@@ -212,7 +212,7 @@ do_format() {
     fi
 
     # 检查 js 文件是否存在
-    JS_FILE="$LOCAL_SCRIPT_DIR/脚本/geshihua.js"
+    JS_FILE="$LOCAL_SCRIPT_DIR/geshihua.js"
     if [ ! -f "$JS_FILE" ]; then
         echo "❌ 错误: 找不到 $JS_FILE 文件，请检查路径！"
         read -p "按回车键返回主菜单..."
