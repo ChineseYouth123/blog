@@ -1,0 +1,17 @@
+# 子仓库中的 .github/workflows/notify-parent.yml
+name: Notify Parent Repository
+
+on:
+  push:
+    branches: [main] # 或子仓库实际使用的分支
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch to parent
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PARENT_REPO_PAT }} # 关键：使用 PAT，而非 GITHUB_TOKEN
+          repository: ChineseYouth123/news
+          event-type: submodule-updated
